@@ -83,7 +83,7 @@ import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
 
 enum class ActiveScreenTab {
-    SCANNER, HISTORY
+    SCANNER, GENERATOR, HISTORY
 }
 
 @Composable
@@ -164,7 +164,7 @@ fun SecurityScannerScreen() {
                         }
 
                         Button(
-                            onClick = { showQrGeneratorDialog = true },
+                            onClick = { currentTab = ActiveScreenTab.GENERATOR },
                             colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.testTag("open_qr_generator_button")
@@ -177,7 +177,7 @@ fun SecurityScannerScreen() {
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Station Navigation Tabs (Escáner vs Historial)
+                    // Station Navigation Tabs (Escáner, Generar QR, Historial)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -202,14 +202,43 @@ fun SecurityScannerScreen() {
                                     imageVector = Icons.Default.QrCodeScanner,
                                     contentDescription = null,
                                     tint = if (currentTab == ActiveScreenTab.SCANNER) NavyDark else Color.Gray,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "Escáner QR",
+                                    text = "Escáner",
                                     color = if (currentTab == ActiveScreenTab.SCANNER) NavyDark else Color.White,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = { currentTab = ActiveScreenTab.GENERATOR },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (currentTab == ActiveScreenTab.GENERATOR) GoldPrimary else Color.Transparent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("tab_generator_btn")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.QrCode,
+                                    contentDescription = null,
+                                    tint = if (currentTab == ActiveScreenTab.GENERATOR) NavyDark else Color.Gray,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Generar QR",
+                                    color = if (currentTab == ActiveScreenTab.GENERATOR) NavyDark else Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
                                 )
                             }
                         }
@@ -231,14 +260,14 @@ fun SecurityScannerScreen() {
                                     imageVector = Icons.Default.History,
                                     contentDescription = null,
                                     tint = if (currentTab == ActiveScreenTab.HISTORY) NavyDark else Color.Gray,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Historial (${visitorEntries.size})",
                                     color = if (currentTab == ActiveScreenTab.HISTORY) NavyDark else Color.White,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
+                                    fontSize = 11.sp
                                 )
                             }
                         }
@@ -409,6 +438,15 @@ fun SecurityScannerScreen() {
                             Spacer(modifier = Modifier.height(24.dp))
                         }
                     }
+                }
+
+                ActiveScreenTab.GENERATOR -> {
+                    com.example.ui.screens.QrGeneratorScreen(
+                        onSimulateScan = { passCode ->
+                            currentTab = ActiveScreenTab.SCANNER
+                            verifyPassCode(passCode)
+                        }
+                    )
                 }
 
                 ActiveScreenTab.HISTORY -> {
