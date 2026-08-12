@@ -33,6 +33,8 @@ import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.House
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -54,7 +56,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -86,6 +90,7 @@ fun VisitorHistoryScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("TODOS") }
     var showClearDialog by remember { mutableStateOf(false) }
+    var selectedDetailEntry by remember { mutableStateOf<VisitorEntry?>(null) }
 
     val pendingCount = entries.count { it.status == VisitorStatus.PENDING }
     val verifiedCount = entries.count { it.status == VisitorStatus.VERIFIED }
@@ -306,6 +311,7 @@ fun VisitorHistoryScreen(
                 items(filteredEntries, key = { it.id }) { entry ->
                     HistoryLogCard(
                         entry = entry,
+                        onClick = { selectedDetailEntry = entry },
                         onVerify = { onStatusChange(entry, VisitorStatus.VERIFIED) },
                         onDeny = { onStatusChange(entry, VisitorStatus.DENIED) }
                     )
@@ -353,6 +359,14 @@ fun VisitorHistoryScreen(
             shape = RoundedCornerShape(16.dp)
         )
     }
+
+    // Detail modal dialog for selected visitor log entry
+    selectedDetailEntry?.let { entry ->
+        VisitorDetailDialog(
+            entry = entry,
+            onDismiss = { selectedDetailEntry = null }
+        )
+    }
 }
 
 @Composable
@@ -391,16 +405,20 @@ private fun HistoryKpiBadge(
 @Composable
 fun HistoryLogCard(
     entry: VisitorEntry,
+    onClick: () -> Unit = {},
     onVerify: () -> Unit,
     onDeny: () -> Unit
 ) {
     val (statusLabel, statusColor, statusIcon) = when (entry.status) {
         VisitorStatus.VERIFIED -> Triple("VERIFICADO", SuccessGreen, Icons.Default.CheckCircle)
+        VisitorStatus.CHECKED_IN -> Triple("CHECKED-IN", CyanNeon, Icons.Default.CheckCircle)
+        VisitorStatus.DEPARTED -> Triple("DEPARTED", Color(0xFF9CA3AF), Icons.Default.Schedule)
         VisitorStatus.PENDING -> Triple("PENDIENTE", WarningOrange, Icons.Default.HourglassTop)
         VisitorStatus.DENIED -> Triple("DENEGADO", ErrorRed, Icons.Default.Cancel)
     }
 
     Card(
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
             .testTag("history_card_${entry.id}"),
@@ -570,3 +588,226 @@ fun HistoryLogCard(
         }
     }
 }
+
+@Composable
+fun VisitorDetailDialog(
+    entry: VisitorEntry,
+    onDismiss: () -> Unit
+) {
+    val (statusLabel, statusBg, statusFg, statusIcon) = when (entry.status) {
+        VisitorStatus.VERIFIED -> Quadruple("Aprobado", SuccessGreen.copy(alpha = 0.15f), SuccessGreen, Icons.Default.CheckCircle)
+        VisitorStatus.CHECKED_IN -> Quadruple("Checked-In", CyanNeon.copy(alpha = 0.18f), CyanNeon, Icons.Default.CheckCircle)
+        VisitorStatus.DEPARTED -> Quadruple("Departed", Color(0xFF9CA3AF).copy(alpha = 0.18f), Color(0xFFE5E7EB), Icons.Default.Schedule)
+        VisitorStatus.PENDING -> Quadruple("Pendiente", GoldPrimary.copy(alpha = 0.15f), GoldPrimary, Icons.Default.HourglassTop)
+        VisitorStatus.DENIED -> Quadruple("Denegado", ErrorRed.copy(alpha = 0.15f), ErrorRed, Icons.Default.Cancel)
+    }
+
+    val formattedFullDate = remember(entry.timestampMillis) {
+        val sdf = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm:ss", java.util.Locale.getDefault())
+        sdf.format(java.util.Date(entry.timestampMillis))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Detalle de Registro de Visita",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Surface(
+                    color = statusBg,
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, statusFg.copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(imageVector = statusIcon, contentDescription = null, tint = statusFg, modifier = Modifier.size(14.dp))
+                        Text(text = statusLabel, color = statusFg, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Photo Snapshot / Avatar Section
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(110.dp)
+                        .background(NavyDark, shape = RoundedCornerShape(12.dp))
+                        .border(1.dp, GoldPrimary.copy(alpha = 0.3f), shape = RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (!entry.photoPath.isNullOrEmpty()) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.Face,
+                                contentDescription = "Foto de Visitante Capturada",
+                                tint = GoldPrimary,
+                                modifier = Modifier.size(42.dp)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "📸 Captura de Rostro Guardada",
+                                color = GoldPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = entry.photoPath,
+                                color = TextMuted,
+                                fontSize = 9.sp,
+                                maxLines = 1
+                            )
+                        }
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                imageVector = Icons.Default.Badge,
+                                contentDescription = "Sin Foto",
+                                tint = TextMuted,
+                                modifier = Modifier.size(38.dp)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Sin captura fotográfica adjunta",
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+
+                // Visitor Details Data Card
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(NavyDark, shape = RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DetailRow(label = "Visitante", value = entry.visitorName, icon = Icons.Default.Person)
+                    DetailRow(label = "Documento RUT", value = entry.visitorDocument, icon = Icons.Default.Badge)
+                    DetailRow(label = "Unidad Destino", value = entry.destinationHouse, icon = Icons.Default.House)
+                    DetailRow(label = "Tipo de Pase", value = "${entry.passTypeLabel} (${entry.passCode})", icon = Icons.Default.QrCode)
+                    if (!entry.vehiclePlate.isNullOrEmpty()) {
+                        DetailRow(label = "Patente Vehículo", value = entry.vehiclePlate, icon = Icons.Default.DirectionsCar)
+                    }
+                    DetailRow(label = "Fecha y Hora Entrada", value = formattedFullDate, icon = Icons.Default.Schedule)
+                }
+
+                if (!entry.guardNotes.isNullOrEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(NavyDark, shape = RoundedCornerShape(10.dp))
+                            .padding(10.dp)
+                    ) {
+                        Text("Notas del Guardia / Sistema:", color = TextMuted, fontSize = 10.sp)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(entry.guardNotes, color = Color.White, fontSize = 11.sp)
+                    }
+                }
+
+                // Custom Resident Text Notes Field
+                var residentNotesInput by remember { mutableStateOf(entry.residentNotes ?: "") }
+                val context = LocalContext.current
+                val scope = rememberCoroutineScope()
+                val db = remember { com.example.data.booking.AppDatabase.getDatabase(context) }
+                val repository = remember { com.example.data.visitor.VisitorCheckInRepository(db.visitorCheckInDao()) }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(NavyDark, shape = RoundedCornerShape(10.dp))
+                        .padding(10.dp)
+                ) {
+                    Text("Nota Personal del Residente:", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = residentNotesInput,
+                        onValueChange = { residentNotesInput = it },
+                        placeholder = { Text("Ej: Entregó paquete de Amazon, familiar autorizado...", color = TextMuted, fontSize = 11.sp) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = GoldPrimary,
+                            unfocusedBorderColor = Color(0xFF374151),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        maxLines = 3
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val entryIdLong = entry.id.toLongOrNull() ?: 0L
+                                if (entryIdLong > 0L) {
+                                    repository.updateResidentNotes(entryIdLong, residentNotesInput)
+                                    Toast.makeText(context, "📝 Nota de residente guardada en Room DB", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Nota actualizada localmente", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                    ) {
+                        Text("Guardar Nota de Residente", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = NavyDark),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Cerrar", fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = NavySurface,
+        shape = RoundedCornerShape(18.dp)
+    )
+}
+
+@Composable
+private fun DetailRow(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(imageVector = icon, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(14.dp))
+            Text(text = label, color = TextMuted, fontSize = 11.sp)
+        }
+        Text(text = value, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+

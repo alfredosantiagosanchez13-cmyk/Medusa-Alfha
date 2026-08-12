@@ -7,6 +7,8 @@ import java.util.Locale
 enum class VisitorStatus(val label: String) {
     PENDING("Pendiente"),
     VERIFIED("Verificado"),
+    CHECKED_IN("Checked-In"),
+    DEPARTED("Departed"),
     DENIED("Denegado")
 }
 
@@ -20,7 +22,9 @@ data class VisitorEntry(
     val vehiclePlate: String? = null,
     val timestampMillis: Long = System.currentTimeMillis(),
     val status: VisitorStatus,
-    val guardNotes: String? = null
+    val photoPath: String? = null,
+    val guardNotes: String? = null,
+    val residentNotes: String? = null
 ) {
     val formattedTime: String
         get() = SimpleDateFormat("HH:mm:ss - dd/MM/yyyy", Locale.getDefault()).format(Date(timestampMillis))

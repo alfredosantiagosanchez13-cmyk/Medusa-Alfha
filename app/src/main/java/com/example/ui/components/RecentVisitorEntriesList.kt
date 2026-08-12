@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.House
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -288,6 +289,8 @@ fun VisitorEntryCard(
     val (statusLabel, statusColor, statusIcon) = when (entry.status) {
         VisitorStatus.PENDING -> Triple("PENDIENTE", WarningOrange, Icons.Default.HourglassTop)
         VisitorStatus.VERIFIED -> Triple("VERIFICADO", SuccessGreen, Icons.Default.CheckCircle)
+        VisitorStatus.CHECKED_IN -> Triple("CHECKED-IN", CyanNeon, Icons.Default.CheckCircle)
+        VisitorStatus.DEPARTED -> Triple("DEPARTED", Color(0xFF9CA3AF), Icons.Default.Schedule)
         VisitorStatus.DENIED -> Triple("DENEGADO", ErrorRed, Icons.Default.Cancel)
     }
 

@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FilterList
@@ -51,10 +52,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +67,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.booking.AppDatabase
+import com.example.data.visitor.VisitorCheckIn
+import com.example.data.visitor.VisitorCheckInRepository
 import com.example.scanner.GuestAccessLog
 import com.example.scanner.PassStatus
 import com.example.scanner.QrPassEntity
@@ -72,6 +78,7 @@ import com.example.scanner.SampleVisitorEntries
 import com.example.scanner.VerificationResult
 import com.example.scanner.VisitorEntry
 import com.example.scanner.VisitorStatus
+import kotlinx.coroutines.launch
 import com.example.ui.components.CameraScannerView
 import com.example.ui.components.PanicAlertEvent
 import com.example.ui.components.PanicFloorPlanCard
@@ -90,24 +97,50 @@ import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
 
 enum class ActiveScreenTab {
-    SCANNER, GENERATOR, HISTORY, ANALYTICS
+    SCANNER, GENERATOR, HISTORY, ANALYTICS, AI_COPILOT
 }
 
 @Composable
 fun SecurityScannerScreen() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val db = remember { AppDatabase.getDatabase(context) }
+    val visitorCheckInDao = remember { db.visitorCheckInDao() }
+    val repository = remember { VisitorCheckInRepository(visitorCheckInDao) }
+
+    val roomCheckIns by repository.allCheckIns.collectAsState(initial = emptyList())
+
+    // Auto-seed initial sample data into Room DB on first launch
+    LaunchedEffect(Unit) {
+        if (visitorCheckInDao.getCheckInCount() == 0) {
+            SampleVisitorEntries.getSampleEntries().forEach { sample ->
+                visitorCheckInDao.insertCheckIn(
+                    VisitorCheckIn(
+                        visitorName = sample.visitorName,
+                        visitorDocument = sample.visitorDocument,
+                        destinationHouse = sample.destinationHouse,
+                        passCode = sample.passCode,
+                        passTypeLabel = sample.passTypeLabel,
+                        vehiclePlate = sample.vehiclePlate,
+                        status = sample.status.name,
+                        timestampMillis = sample.timestampMillis,
+                        guardNotes = sample.guardNotes
+                    )
+                )
+            }
+        }
+    }
+
+    val visitorEntries = remember(roomCheckIns) {
+        roomCheckIns.map { it.toVisitorEntry() }
+    }
 
     var currentTab by remember { mutableStateOf(ActiveScreenTab.SCANNER) }
     var activeVerificationResult by remember { mutableStateOf<VerificationResult?>(null) }
     var showQrGeneratorDialog by remember { mutableStateOf(false) }
     var manualCodeInput by remember { mutableStateOf("") }
     var activePanicAlert by remember { mutableStateOf<PanicAlertEvent?>(null) }
-
-    val visitorEntries = remember {
-        mutableStateListOf<VisitorEntry>().apply {
-            addAll(SampleVisitorEntries.getSampleEntries())
-        }
-    }
 
     fun verifyPassCode(code: String) {
         triggerScanHaptic(context)
@@ -189,6 +222,30 @@ fun SecurityScannerScreen() {
                             )
 
                             com.example.ui.components.BatteryIndicatorPill(showDetailedLabel = false)
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = SuccessGreen.copy(alpha = 0.15f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.5f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(6.dp)
+                                            .background(SuccessGreen, CircleShape)
+                                    )
+                                    Text(
+                                        text = "ROOM: ${roomCheckIns.size}",
+                                        color = SuccessGreen,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
 
                             Button(
                                 onClick = { currentTab = ActiveScreenTab.GENERATOR },
@@ -323,6 +380,35 @@ fun SecurityScannerScreen() {
                                 Text(
                                     text = "Analítica",
                                     color = if (currentTab == ActiveScreenTab.ANALYTICS) NavyDark else Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = { currentTab = ActiveScreenTab.AI_COPILOT },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (currentTab == ActiveScreenTab.AI_COPILOT) CyanNeon else Color.Transparent,
+                            modifier = Modifier
+                                .weight(1.1f)
+                                .testTag("tab_ai_copilot_btn")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = if (currentTab == ActiveScreenTab.AI_COPILOT) NavyDark else CyanNeon,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Copiloto AI",
+                                    color = if (currentTab == ActiveScreenTab.AI_COPILOT) NavyDark else Color.White,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp
                                 )
@@ -498,14 +584,17 @@ fun SecurityScannerScreen() {
                             RecentVisitorEntriesList(
                                 entries = visitorEntries,
                                 onStatusChange = { entry, newStatus ->
-                                    val index = visitorEntries.indexOfFirst { it.id == entry.id }
-                                    if (index != -1) {
-                                        visitorEntries[index] = entry.copy(
-                                            status = newStatus,
-                                            guardNotes = if (newStatus == VisitorStatus.VERIFIED) "Entrada verificada por agente" else "Entrada rechazada por agente"
-                                        )
+                                    val idLong = entry.id.toLongOrNull()
+                                    if (idLong != null) {
+                                        scope.launch {
+                                            repository.updateCheckInStatus(
+                                                id = idLong,
+                                                status = newStatus.name,
+                                                notes = if (newStatus == VisitorStatus.VERIFIED) "Entrada verificada en Room DB por agente" else "Entrada rechazada en Room DB por agente"
+                                            )
+                                        }
                                         val statusMsg = if (newStatus == VisitorStatus.VERIFIED) "Verificado" else "Denegado"
-                                        Toast.makeText(context, "Estado actualizado: $statusMsg (${entry.visitorName})", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Room DB Actualizado: $statusMsg (${entry.visitorName})", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             )
@@ -530,24 +619,34 @@ fun SecurityScannerScreen() {
                     com.example.ui.screens.VisitorHistoryScreen(
                         entries = visitorEntries,
                         onStatusChange = { entry, newStatus ->
-                            val index = visitorEntries.indexOfFirst { it.id == entry.id }
-                            if (index != -1) {
-                                visitorEntries[index] = entry.copy(
-                                    status = newStatus,
-                                    guardNotes = if (newStatus == VisitorStatus.VERIFIED) "Entrada verificada por agente" else "Entrada rechazada por agente"
-                                )
+                            val idLong = entry.id.toLongOrNull()
+                            if (idLong != null) {
+                                scope.launch {
+                                    repository.updateCheckInStatus(
+                                        id = idLong,
+                                        status = newStatus.name,
+                                        notes = if (newStatus == VisitorStatus.VERIFIED) "Entrada verificada por agente" else "Entrada rechazada por agente"
+                                    )
+                                }
                                 val statusMsg = if (newStatus == VisitorStatus.VERIFIED) "Verificado" else "Denegado"
-                                Toast.makeText(context, "Estado actualizado: $statusMsg (${entry.visitorName})", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Estado actualizado en Room DB: $statusMsg", Toast.LENGTH_SHORT).show()
                             }
                         },
                         onClearHistory = {
-                            visitorEntries.clear()
+                            scope.launch {
+                                repository.deleteAllCheckIns()
+                            }
+                            Toast.makeText(context, "Historial de Room DB borrado", Toast.LENGTH_SHORT).show()
                         }
                     )
                 }
 
                 ActiveScreenTab.ANALYTICS -> {
                     com.example.ui.screens.AnalyticsSummaryScreen()
+                }
+
+                ActiveScreenTab.AI_COPILOT -> {
+                    com.example.ui.screens.CondoAiCopilotScreen()
                 }
             }
         }
@@ -560,40 +659,42 @@ fun SecurityScannerScreen() {
                     val pass = result.qrPass
                     if (pass != null) {
                         SamplePassRepository.markPassAsUsed(pass.passCode)
-                        visitorEntries.add(
-                            0,
-                            VisitorEntry(
-                                visitorName = pass.guestName,
-                                visitorDocument = pass.guestDocument,
-                                destinationHouse = pass.destinationHouse,
-                                passCode = pass.passCode,
-                                passTypeLabel = pass.passType.label,
-                                vehiclePlate = pass.vehiclePlate,
-                                status = VisitorStatus.VERIFIED,
-                                guardNotes = "Ingreso Verificado en Garita Principal"
+                        scope.launch {
+                            repository.insertCheckIn(
+                                VisitorCheckIn(
+                                    visitorName = pass.guestName,
+                                    visitorDocument = pass.guestDocument,
+                                    destinationHouse = pass.destinationHouse,
+                                    passCode = pass.passCode,
+                                    passTypeLabel = pass.passType.label,
+                                    vehiclePlate = pass.vehiclePlate,
+                                    status = "VERIFICADO",
+                                    guardNotes = "Ingreso Verificado con Escáner CameraX"
+                                )
                             )
-                        )
-                        Toast.makeText(context, "Ingreso Aprobado y Registrado: ${pass.guestName}", Toast.LENGTH_LONG).show()
+                        }
+                        Toast.makeText(context, "✅ Ingreso Guardado en Base de Datos Room: ${pass.guestName}", Toast.LENGTH_LONG).show()
                     }
                     activeVerificationResult = null
                 },
                 onDenyEntry = {
                     val pass = result.qrPass
                     if (pass != null) {
-                        visitorEntries.add(
-                            0,
-                            VisitorEntry(
-                                visitorName = pass.guestName,
-                                visitorDocument = pass.guestDocument,
-                                destinationHouse = pass.destinationHouse,
-                                passCode = pass.passCode,
-                                passTypeLabel = pass.passType.label,
-                                vehiclePlate = pass.vehiclePlate,
-                                status = VisitorStatus.DENIED,
-                                guardNotes = "Acceso Denegado en Garita Principal"
+                        scope.launch {
+                            repository.insertCheckIn(
+                                VisitorCheckIn(
+                                    visitorName = pass.guestName,
+                                    visitorDocument = pass.guestDocument,
+                                    destinationHouse = pass.destinationHouse,
+                                    passCode = pass.passCode,
+                                    passTypeLabel = pass.passType.label,
+                                    vehiclePlate = pass.vehiclePlate,
+                                    status = "DENEGADO",
+                                    guardNotes = "Acceso Denegado con Escáner CameraX"
+                                )
                             )
-                        )
-                        Toast.makeText(context, "Acceso Rechazado para ${pass.guestName}", Toast.LENGTH_SHORT).show()
+                        }
+                        Toast.makeText(context, "🚫 Rechazo Almacenado en Room DB: ${pass.guestName}", Toast.LENGTH_SHORT).show()
                     }
                     activeVerificationResult = null
                 },
