@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -234,6 +235,15 @@ fun CameraScannerView(
                 }
             }
 
+            // Battery Indicator overlay for guards
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp)
+            ) {
+                BatteryIndicatorPill()
+            }
+
             // Flashlight & Camera Flip Controls
             Row(
                 modifier = Modifier
@@ -382,14 +392,46 @@ fun ScannerOverlayReticle(isSuccess: Boolean = false) {
 
         val cornerColor = if (isSuccess) Color(0xFF10B981) else Color(0xFFFFD700)
 
-        // Green flash background fill on scan success
-        if (isSuccess) {
-            drawRect(
-                color = Color(0x3310B981),
-                topLeft = Offset(left, top),
-                size = androidx.compose.ui.geometry.Size(boxSize, boxSize)
-            )
-        }
+        // Translucent dark mask outside the central scan square area
+        val maskColor = Color(0x770B132B) // Semi-transparent dark overlay
+
+        // Top mask
+        drawRect(
+            color = maskColor,
+            topLeft = Offset(0f, 0f),
+            size = androidx.compose.ui.geometry.Size(width, top)
+        )
+        // Bottom mask
+        drawRect(
+            color = maskColor,
+            topLeft = Offset(0f, bottom),
+            size = androidx.compose.ui.geometry.Size(width, height - bottom)
+        )
+        // Left mask
+        drawRect(
+            color = maskColor,
+            topLeft = Offset(0f, top),
+            size = androidx.compose.ui.geometry.Size(left, boxSize)
+        )
+        // Right mask
+        drawRect(
+            color = maskColor,
+            topLeft = Offset(right, top),
+            size = androidx.compose.ui.geometry.Size(width - right, boxSize)
+        )
+
+        // Central scan square translucent border outline & tint
+        drawRect(
+            color = if (isSuccess) Color(0x3310B981) else Color(0x11FFFFFF),
+            topLeft = Offset(left, top),
+            size = androidx.compose.ui.geometry.Size(boxSize, boxSize)
+        )
+        drawRect(
+            color = if (isSuccess) Color(0xFF10B981) else Color(0x66FFD700),
+            topLeft = Offset(left, top),
+            size = androidx.compose.ui.geometry.Size(boxSize, boxSize),
+            style = Stroke(width = 1.5.dp.toPx())
+        )
 
         // Top-Left
         drawLine(cornerColor, Offset(left, top), Offset(left + cornerLength, top), strokeWidth = cornerStroke)

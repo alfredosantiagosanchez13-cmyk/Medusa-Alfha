@@ -24,15 +24,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -69,6 +73,9 @@ import com.example.scanner.VerificationResult
 import com.example.scanner.VisitorEntry
 import com.example.scanner.VisitorStatus
 import com.example.ui.components.CameraScannerView
+import com.example.ui.components.PanicAlertEvent
+import com.example.ui.components.PanicFloorPlanCard
+import com.example.ui.components.PulsingPanicButton
 import com.example.ui.components.PassVerificationSheet
 import com.example.ui.components.QrGeneratorDialog
 import com.example.ui.components.RecentVisitorEntriesList
@@ -83,7 +90,7 @@ import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
 
 enum class ActiveScreenTab {
-    SCANNER, GENERATOR, HISTORY
+    SCANNER, GENERATOR, HISTORY, ANALYTICS
 }
 
 @Composable
@@ -94,6 +101,7 @@ fun SecurityScannerScreen() {
     var activeVerificationResult by remember { mutableStateOf<VerificationResult?>(null) }
     var showQrGeneratorDialog by remember { mutableStateOf(false) }
     var manualCodeInput by remember { mutableStateOf("") }
+    var activePanicAlert by remember { mutableStateOf<PanicAlertEvent?>(null) }
 
     val visitorEntries = remember {
         mutableStateListOf<VisitorEntry>().apply {
@@ -163,15 +171,35 @@ fun SecurityScannerScreen() {
                             }
                         }
 
-                        Button(
-                            onClick = { currentTab = ActiveScreenTab.GENERATOR },
-                            colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.testTag("open_qr_generator_button")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Generar QR", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            PulsingPanicButton(
+                                isActive = activePanicAlert != null,
+                                onClick = {
+                                    if (activePanicAlert == null) {
+                                        activePanicAlert = com.example.ui.components.SampleCondoUnits.getDefaultPanicEvent()
+                                        Toast.makeText(context, "🚨 ALERTA DE PÁNICO ACTIVADA EN MANZANA A - CASA 104", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        activePanicAlert = null
+                                        Toast.makeText(context, "Alerta de pánico desactivada", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+
+                            com.example.ui.components.BatteryIndicatorPill(showDetailedLabel = false)
+
+                            Button(
+                                onClick = { currentTab = ActiveScreenTab.GENERATOR },
+                                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.testTag("open_qr_generator_button")
+                            ) {
+                                Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Generar QR", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
                         }
                     }
 
@@ -264,8 +292,37 @@ fun SecurityScannerScreen() {
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
-                                    text = "Historial (${visitorEntries.size})",
+                                    text = "Historial",
                                     color = if (currentTab == ActiveScreenTab.HISTORY) NavyDark else Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = { currentTab = ActiveScreenTab.ANALYTICS },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (currentTab == ActiveScreenTab.ANALYTICS) GoldPrimary else Color.Transparent,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("tab_analytics_btn")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Analytics,
+                                    contentDescription = null,
+                                    tint = if (currentTab == ActiveScreenTab.ANALYTICS) NavyDark else Color.Gray,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Analítica",
+                                    color = if (currentTab == ActiveScreenTab.ANALYTICS) NavyDark else Color.White,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 11.sp
                                 )
@@ -283,6 +340,26 @@ fun SecurityScannerScreen() {
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        // Interactive Floor-Plan Map for Panic Alerts & Spatial Location Context
+                        item {
+                            PanicFloorPlanCard(
+                                activeAlert = activePanicAlert,
+                                onSimulatePanicTrigger = { unit ->
+                                    activePanicAlert = PanicAlertEvent(
+                                        id = "PANIC-${System.currentTimeMillis() % 10000}",
+                                        unit = unit,
+                                        alertType = "🚨 ALERTA DE PÁNICO RESIDENCIAL",
+                                        severity = "CRÍTICO",
+                                        timestamp = "Reciente"
+                                    )
+                                    Toast.makeText(context, "🚨 Alerta disparada en ${unit.unitId} (${unit.residentName})", Toast.LENGTH_LONG).show()
+                                },
+                                onResolveAlert = {
+                                    activePanicAlert = null
+                                }
+                            )
+                        }
+
                         // Live CameraX & ZXing Scanner Component
                         item {
                             Column {
@@ -467,6 +544,10 @@ fun SecurityScannerScreen() {
                             visitorEntries.clear()
                         }
                     )
+                }
+
+                ActiveScreenTab.ANALYTICS -> {
+                    com.example.ui.screens.AnalyticsSummaryScreen()
                 }
             }
         }
