@@ -1,7 +1,7 @@
 package com.example.auth
 
 import android.content.Context
-import android.widget.Toast
+import android.os.Build
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -17,21 +17,29 @@ object BiometricAuthManager {
     }
 
     fun getBiometricStatus(context: Context): BiometricStatus {
-        val biometricManager = BiometricManager.from(context)
-        return when (biometricManager.canAuthenticate(
-            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        )) {
-            BiometricManager.BIOMETRIC_SUCCESS -> BiometricStatus.AVAILABLE
-            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BiometricStatus.NOT_ENROLLED
-            BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> BiometricStatus.HARDWARE_UNAVAILABLE
-            else -> BiometricStatus.UNSUPPORTED
+        return try {
+            val biometricManager = BiometricManager.from(context)
+            val authenticators = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            } else {
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            }
+
+            when (biometricManager.canAuthenticate(authenticators)) {
+                BiometricManager.BIOMETRIC_SUCCESS -> BiometricStatus.AVAILABLE
+                BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BiometricStatus.NOT_ENROLLED
+                BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> BiometricStatus.HARDWARE_UNAVAILABLE
+                else -> BiometricStatus.UNSUPPORTED
+            }
+        } catch (e: Exception) {
+            BiometricStatus.UNSUPPORTED
         }
     }
 
     fun promptBiometricAuth(
         activity: FragmentActivity,
-        title: String = "Autenticación Biométrica",
-        subtitle: String = "Confirma tu huella dactilar o rostro para acceder a la generación de pases QR",
+        title: String = "Control de Acceso Garita - Biometría",
+        subtitle: String = "Confirme su huella dactilar o rostro para activar la cámara y el escáner QR",
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -46,15 +54,17 @@ object BiometricAuthManager {
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                 super.onAuthenticationError(errorCode, errString)
                 if (errorCode == BiometricPrompt.ERROR_USER_CANCELED || errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON) {
-                    onError("Autenticación cancelada por el usuario")
+                    onError("Autenticación cancelada")
+                } else if (errorCode == BiometricPrompt.ERROR_NO_BIOMETRICS || errorCode == BiometricPrompt.ERROR_HW_NOT_PRESENT || errorCode == BiometricPrompt.ERROR_HW_UNAVAILABLE) {
+                    onError("Biometría no disponible en este dispositivo")
                 } else {
-                    onError("Error de biometría: $errString")
+                    onError("Error biométrico: $errString")
                 }
             }
 
             override fun onAuthenticationFailed() {
                 super.onAuthenticationFailed()
-                onError("Huella / Rostro no reconocido. Reintente.")
+                onError("Huella dactilar o rostro no reconocido. Reintente.")
             }
         }
 
@@ -63,17 +73,33 @@ object BiometricAuthManager {
         val promptInfoBuilder = BiometricPrompt.PromptInfo.Builder()
             .setTitle(title)
             .setSubtitle(subtitle)
-            .setAllowedAuthenticators(
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            promptInfoBuilder.setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_STRONG or
                         BiometricManager.Authenticators.DEVICE_CREDENTIAL
             )
+        } else {
+            promptInfoBuilder.setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_WEAK or
+                        BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            )
+        }
 
         try {
             biometricPrompt.authenticate(promptInfoBuilder.build())
         } catch (e: Exception) {
-            e.printStackTrace()
-            // Fallback for devices without enrolled biometrics or credentials configured
-            onError("Biometría no configurada: ${e.message}")
+            // If device credential + biometric combination is not allowed, retry with negative button
+            try {
+                val fallbackPrompt = BiometricPrompt.PromptInfo.Builder()
+                    .setTitle(title)
+                    .setSubtitle(subtitle)
+                    .setNegativeButtonText("Cancelar")
+                    .build()
+                biometricPrompt.authenticate(fallbackPrompt)
+            } catch (fallbackEx: Exception) {
+                onError("No se pudo iniciar el servicio biométrico: ${fallbackEx.localizedMessage}")
+            }
         }
     }
 }

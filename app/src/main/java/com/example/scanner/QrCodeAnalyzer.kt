@@ -12,6 +12,7 @@ import com.google.zxing.MultiFormatReader
 import com.google.zxing.NotFoundException
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.RGBLuminanceSource
 
 class QrCodeAnalyzer(
     private val onQrCodeScanned: (String) -> Unit
@@ -19,8 +20,13 @@ class QrCodeAnalyzer(
 
     private val reader = MultiFormatReader().apply {
         val hints = mapOf(
-            DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),
-            DecodeHintType.TRY_HARDER to true,
+            DecodeHintType.POSSIBLE_FORMATS to listOf(
+                BarcodeFormat.QR_CODE,
+                BarcodeFormat.DATA_MATRIX,
+                BarcodeFormat.AZTEC,
+                BarcodeFormat.CODE_128
+            ),
+            DecodeHintType.TRY_HARDER to java.lang.Boolean.TRUE,
             DecodeHintType.CHARACTER_SET to "UTF-8"
         )
         setHints(hints)
@@ -38,44 +44,54 @@ class QrCodeAnalyzer(
                     mediaImage.format == ImageFormat.YUV_444_888
                 )
         ) {
-            val rotationDegrees = imageProxy.imageInfo.rotationDegrees
-            val plane = mediaImage.planes[0]
-            val width = mediaImage.width
-            val height = mediaImage.height
-
-            val rawYData = extractYPlaneData(plane, width, height)
-            val rotatedYData = rotateYData(rawYData, width, height, rotationDegrees)
-
-            val (finalWidth, finalHeight) = if (rotationDegrees == 90 || rotationDegrees == 270) {
-                Pair(height, width)
-            } else {
-                Pair(width, height)
-            }
-
-            val source = PlanarYUVLuminanceSource(
-                rotatedYData,
-                finalWidth,
-                finalHeight,
-                0,
-                0,
-                finalWidth,
-                finalHeight,
-                false
-            )
-            val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
-
             try {
-                val result = reader.decodeWithState(binaryBitmap)
-                val qrText = result.text
-                val currentTime = System.currentTimeMillis()
+                val rotationDegrees = imageProxy.imageInfo.rotationDegrees
+                val plane = mediaImage.planes[0]
+                val width = mediaImage.width
+                val height = mediaImage.height
 
-                if (!qrText.isNullOrBlank() && (qrText != lastScannedText || currentTime - lastScannedTimestamp > 1500)) {
-                    lastScannedText = qrText
-                    lastScannedTimestamp = currentTime
-                    onQrCodeScanned(qrText)
+                val rawYData = extractYPlaneData(plane, width, height)
+                val rotatedYData = rotateYData(rawYData, width, height, rotationDegrees)
+
+                val (finalWidth, finalHeight) = if (rotationDegrees == 90 || rotationDegrees == 270) {
+                    Pair(height, width)
+                } else {
+                    Pair(width, height)
                 }
-            } catch (_: NotFoundException) {
-                // No QR code found in current frame
+
+                val source = PlanarYUVLuminanceSource(
+                    rotatedYData,
+                    finalWidth,
+                    finalHeight,
+                    0,
+                    0,
+                    finalWidth,
+                    finalHeight,
+                    false
+                )
+                val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
+
+                var decodedText: String? = null
+                try {
+                    val result = reader.decodeWithState(binaryBitmap)
+                    decodedText = result.text
+                } catch (_: NotFoundException) {
+                    // Try inverted luminance source for dark-mode inverted QR codes
+                    try {
+                        val invertedBitmap = BinaryBitmap(HybridBinarizer(source.invert()))
+                        val result = reader.decodeWithState(invertedBitmap)
+                        decodedText = result.text
+                    } catch (_: Exception) {
+                        // Not found in this frame
+                    }
+                }
+
+                val currentTime = System.currentTimeMillis()
+                if (!decodedText.isNullOrBlank() && (decodedText != lastScannedText || currentTime - lastScannedTimestamp > 1200)) {
+                    lastScannedText = decodedText
+                    lastScannedTimestamp = currentTime
+                    onQrCodeScanned(decodedText)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             } finally {

@@ -96,8 +96,18 @@ import com.example.ui.theme.NavySurface
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
 
-enum class ActiveScreenTab {
-    SCANNER, GENERATOR, HISTORY, ANALYTICS, AI_COPILOT
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+
+enum class ActiveScreenTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    SCANNER("Escáner", Icons.Default.QrCodeScanner),
+    GENERATOR("Generar QR", Icons.Default.QrCode),
+    HISTORY("Historial", Icons.Default.History),
+    ANALYTICS("Analítica", Icons.Default.Analytics),
+    AI_COPILOT("Copiloto AI", Icons.Default.AutoAwesome)
 }
 
 @Composable
@@ -149,301 +159,173 @@ fun SecurityScannerScreen() {
     }
 
     Scaffold(
-        containerColor = NavyDark
+        containerColor = NavyDark,
+        bottomBar = {
+            NavigationBar(
+                containerColor = NavySurface,
+                tonalElevation = 8.dp,
+                modifier = Modifier.testTag("main_bottom_navigation")
+            ) {
+                ActiveScreenTab.values().forEach { tab ->
+                    val isSelected = currentTab == tab
+                    NavigationBarItem(
+                        selected = isSelected,
+                        onClick = { currentTab = tab },
+                        icon = {
+                            if (tab == ActiveScreenTab.HISTORY && roomCheckIns.isNotEmpty()) {
+                                BadgedBox(
+                                    badge = {
+                                        Badge(
+                                            containerColor = GoldPrimary,
+                                            contentColor = NavyDark
+                                        ) {
+                                            Text("${roomCheckIns.size}", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = tab.icon,
+                                        contentDescription = tab.label,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            } else {
+                                Icon(
+                                    imageVector = tab.icon,
+                                    contentDescription = tab.label,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        },
+                        label = {
+                            Text(
+                                text = tab.label,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1
+                            )
+                        },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon else NavyDark,
+                            selectedTextColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon else GoldPrimary,
+                            indicatorColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon.copy(alpha = 0.2f) else GoldPrimary,
+                            unselectedIconColor = Color.Gray,
+                            unselectedTextColor = Color.Gray
+                        ),
+                        modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
+                    )
+                }
+            }
+        }
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 14.dp)
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
             // Guard Header & Station Status
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = NavySurface,
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, GoldPrimary.copy(alpha = 0.8f))
+                border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.6f))
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .background(GoldPrimary, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Shield,
-                                    contentDescription = null,
-                                    tint = NavyDark,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "MEDUSA ALFHA • SEGURIDAD",
-                                    color = GoldPrimary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    letterSpacing = 1.sp
-                                )
-                                Text(
-                                    text = "Control de Accesos Garita",
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(GoldPrimary, CircleShape),
+                            contentAlignment = Alignment.Center
                         ) {
-                            PulsingPanicButton(
-                                isActive = activePanicAlert != null,
-                                onClick = {
-                                    if (activePanicAlert == null) {
-                                        activePanicAlert = com.example.ui.components.SampleCondoUnits.getDefaultPanicEvent()
-                                        Toast.makeText(context, "🚨 ALERTA DE PÁNICO ACTIVADA EN MANZANA A - CASA 104", Toast.LENGTH_LONG).show()
-                                    } else {
-                                        activePanicAlert = null
-                                        Toast.makeText(context, "Alerta de pánico desactivada", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = NavyDark,
+                                modifier = Modifier.size(18.dp)
                             )
-
-                            com.example.ui.components.BatteryIndicatorPill(showDetailedLabel = false)
-
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = SuccessGreen.copy(alpha = 0.15f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.5f))
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(6.dp)
-                                            .background(SuccessGreen, CircleShape)
-                                    )
-                                    Text(
-                                        text = "ROOM: ${roomCheckIns.size}",
-                                        color = SuccessGreen,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-
-                            Button(
-                                onClick = { currentTab = ActiveScreenTab.GENERATOR },
-                                colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.testTag("open_qr_generator_button")
-                            ) {
-                                Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Generar QR", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "MEDUSA ALFHA • SEGURIDAD",
+                                color = GoldPrimary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.8.sp
+                            )
+                            Text(
+                                text = "Control de Accesos Garita",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Station Navigation Tabs (Escáner, Generar QR, Historial)
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(NavyDark, RoundedCornerShape(12.dp))
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Surface(
-                            onClick = { currentTab = ActiveScreenTab.SCANNER },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (currentTab == ActiveScreenTab.SCANNER) GoldPrimary else Color.Transparent,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("tab_scanner_btn")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.QrCodeScanner,
-                                    contentDescription = null,
-                                    tint = if (currentTab == ActiveScreenTab.SCANNER) NavyDark else Color.Gray,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Escáner",
-                                    color = if (currentTab == ActiveScreenTab.SCANNER) NavyDark else Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp
-                                )
+                        PulsingPanicButton(
+                            isActive = activePanicAlert != null,
+                            onClick = {
+                                if (activePanicAlert == null) {
+                                    activePanicAlert = com.example.ui.components.SampleCondoUnits.getDefaultPanicEvent()
+                                    Toast.makeText(context, "🚨 ALERTA DE PÁNICO ACTIVADA EN MANZANA A - CASA 104", Toast.LENGTH_LONG).show()
+                                } else {
+                                    activePanicAlert = null
+                                    Toast.makeText(context, "Alerta de pánico desactivada", Toast.LENGTH_SHORT).show()
+                                }
                             }
-                        }
+                        )
 
-                        Surface(
-                            onClick = { currentTab = ActiveScreenTab.GENERATOR },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (currentTab == ActiveScreenTab.GENERATOR) GoldPrimary else Color.Transparent,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("tab_generator_btn")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.QrCode,
-                                    contentDescription = null,
-                                    tint = if (currentTab == ActiveScreenTab.GENERATOR) NavyDark else Color.Gray,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Generar QR",
-                                    color = if (currentTab == ActiveScreenTab.GENERATOR) NavyDark else Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-
-                        Surface(
-                            onClick = { currentTab = ActiveScreenTab.HISTORY },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (currentTab == ActiveScreenTab.HISTORY) GoldPrimary else Color.Transparent,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("tab_history_btn")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.History,
-                                    contentDescription = null,
-                                    tint = if (currentTab == ActiveScreenTab.HISTORY) NavyDark else Color.Gray,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Historial",
-                                    color = if (currentTab == ActiveScreenTab.HISTORY) NavyDark else Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-
-                        Surface(
-                            onClick = { currentTab = ActiveScreenTab.ANALYTICS },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (currentTab == ActiveScreenTab.ANALYTICS) GoldPrimary else Color.Transparent,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("tab_analytics_btn")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Analytics,
-                                    contentDescription = null,
-                                    tint = if (currentTab == ActiveScreenTab.ANALYTICS) NavyDark else Color.Gray,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Analítica",
-                                    color = if (currentTab == ActiveScreenTab.ANALYTICS) NavyDark else Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-
-                        Surface(
-                            onClick = { currentTab = ActiveScreenTab.AI_COPILOT },
-                            shape = RoundedCornerShape(10.dp),
-                            color = if (currentTab == ActiveScreenTab.AI_COPILOT) CyanNeon else Color.Transparent,
-                            modifier = Modifier
-                                .weight(1.1f)
-                                .testTag("tab_ai_copilot_btn")
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = if (currentTab == ActiveScreenTab.AI_COPILOT) NavyDark else CyanNeon,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Copiloto AI",
-                                    color = if (currentTab == ActiveScreenTab.AI_COPILOT) NavyDark else Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
+                        com.example.ui.components.BatteryIndicatorPill(showDetailedLabel = false)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             when (currentTab) {
                 ActiveScreenTab.SCANNER -> {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        // Interactive Floor-Plan Map for Panic Alerts & Spatial Location Context
-                        item {
-                            PanicFloorPlanCard(
-                                activeAlert = activePanicAlert,
-                                onSimulatePanicTrigger = { unit ->
-                                    activePanicAlert = PanicAlertEvent(
-                                        id = "PANIC-${System.currentTimeMillis() % 10000}",
-                                        unit = unit,
-                                        alertType = "🚨 ALERTA DE PÁNICO RESIDENCIAL",
-                                        severity = "CRÍTICO",
-                                        timestamp = "Reciente"
-                                    )
-                                    Toast.makeText(context, "🚨 Alerta disparada en ${unit.unitId} (${unit.residentName})", Toast.LENGTH_LONG).show()
-                                },
-                                onResolveAlert = {
-                                    activePanicAlert = null
-                                }
-                            )
+                        // Interactive Floor-Plan Map for Panic Alerts (displayed with high priority when triggered)
+                        if (activePanicAlert != null) {
+                            item {
+                                PanicFloorPlanCard(
+                                    activeAlert = activePanicAlert,
+                                    onSimulatePanicTrigger = { unit ->
+                                        activePanicAlert = PanicAlertEvent(
+                                            id = "PANIC-${System.currentTimeMillis() % 10000}",
+                                            unit = unit,
+                                            alertType = "🚨 ALERTA DE PÁNICO RESIDENCIAL",
+                                            severity = "CRÍTICO",
+                                            timestamp = "Reciente"
+                                        )
+                                        Toast.makeText(context, "🚨 Alerta disparada en ${unit.unitId} (${unit.residentName})", Toast.LENGTH_LONG).show()
+                                    },
+                                    onResolveAlert = {
+                                        activePanicAlert = null
+                                    }
+                                )
+                            }
                         }
 
                         // Live CameraX & ZXing Scanner Component
