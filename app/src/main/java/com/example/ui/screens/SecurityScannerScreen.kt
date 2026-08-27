@@ -25,8 +25,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.AssignmentLate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
@@ -34,10 +36,13 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -46,6 +51,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -67,27 +75,52 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.auth.AlfhaPermission
+import com.example.auth.AlfhaSecurityContext
+import com.example.auth.RbacValidationOutcome
+import com.example.data.audit.AuditLogEntity
 import com.example.data.booking.AppDatabase
+import com.example.data.core.AlphaCoreEngine
+import com.example.data.notifications.SmartNotificationHub
+import com.example.data.passes.QrPassRepository
+import com.example.data.passes.toQrPassEntity
 import com.example.data.visitor.VisitorCheckIn
 import com.example.data.visitor.VisitorCheckInRepository
+import com.example.data.incident.EmergencyLocationEngine
+import com.example.ui.components.OperationalEmergencyMapView
 import com.example.scanner.GuestAccessLog
 import com.example.scanner.PassStatus
 import com.example.scanner.QrPassEntity
-import com.example.scanner.SamplePassRepository
-import com.example.scanner.SampleVisitorEntries
 import com.example.scanner.VerificationResult
 import com.example.scanner.VisitorEntry
 import com.example.scanner.VisitorStatus
-import kotlinx.coroutines.launch
+import com.example.ui.components.AmenityBookingSection
+import com.example.ui.components.BrandHeaderHeroBanner
+import com.example.ui.components.BrandPhilosophyDialog
+import com.example.ui.components.BrandSplashScreen
 import com.example.ui.components.CameraScannerView
 import com.example.ui.components.PanicAlertEvent
+import com.example.ui.components.IncidentCenterHub
 import com.example.ui.components.PanicFloorPlanCard
 import com.example.ui.components.PulsingPanicButton
 import com.example.ui.components.PassVerificationSheet
+import com.example.ui.components.PackageCenterHub
+import com.example.ui.components.AmenityBookingHub
+import com.example.ui.components.ResidentManagementHub
+import com.example.ui.components.VehicleAccessControlHub
 import com.example.ui.components.QrGeneratorDialog
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Inventory2
+import androidx.compose.material.icons.filled.EventAvailable
+import androidx.compose.material.icons.filled.People
 import com.example.ui.components.RecentVisitorEntriesList
+import com.example.ui.components.VoiceIncidentLoggerComponent
 import com.example.ui.components.triggerScanHaptic
 import com.example.ui.theme.CyanNeon
+import androidx.compose.material.icons.filled.FactCheck
+import com.example.ui.components.FieldValidationChecklistHub
+import com.example.ui.components.FirebaseCloudSyncDialog
+import androidx.compose.material.icons.filled.CloudSync
 import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.GoldPrimary
 import com.example.ui.theme.NavyCard
@@ -95,16 +128,21 @@ import com.example.ui.theme.NavyDark
 import com.example.ui.theme.NavySurface
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
-
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
+import com.example.utils.ResidentNotificationManager
+import kotlinx.coroutines.launch
 
 enum class ActiveScreenTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     SCANNER("Escáner", Icons.Default.QrCodeScanner),
+    VALIDATION("Validación", Icons.Default.FactCheck),
+    VEHICLES("Vehículos", Icons.Default.DirectionsCar),
+    RESIDENTS("Residentes", Icons.Default.People),
+    MAINTENANCE("Mantenimiento", Icons.Default.Build),
+    AMENITIES("Amenidades", Icons.Default.EventAvailable),
+    PACKAGES("Paquetería", Icons.Default.Inventory2),
+    INCIDENTS("Incidencias", Icons.Default.AssignmentLate),
     GENERATOR("Generar QR", Icons.Default.QrCode),
+    SUPERVISION("Supervisión", Icons.Default.Shield),
+    MASTER_ALPHA("Panel Maestro", Icons.Default.Schedule),
     HISTORY("Historial", Icons.Default.History),
     ANALYTICS("Analítica", Icons.Default.Analytics),
     AI_COPILOT("Copiloto AI", Icons.Default.AutoAwesome)
@@ -117,29 +155,17 @@ fun SecurityScannerScreen() {
 
     val db = remember { AppDatabase.getDatabase(context) }
     val visitorCheckInDao = remember { db.visitorCheckInDao() }
+    val qrPassDao = remember { db.qrPassDao() }
     val repository = remember { VisitorCheckInRepository(visitorCheckInDao) }
+    val qrPassRepository = remember { QrPassRepository(qrPassDao) }
 
     val roomCheckIns by repository.allCheckIns.collectAsState(initial = emptyList())
+    val roomPasses by qrPassRepository.allPassesFlow.collectAsState(initial = emptyList())
 
-    // Auto-seed initial sample data into Room DB on first launch
+    // Auto-seed initial data into Room DB on first launch
     LaunchedEffect(Unit) {
-        if (visitorCheckInDao.getCheckInCount() == 0) {
-            SampleVisitorEntries.getSampleEntries().forEach { sample ->
-                visitorCheckInDao.insertCheckIn(
-                    VisitorCheckIn(
-                        visitorName = sample.visitorName,
-                        visitorDocument = sample.visitorDocument,
-                        destinationHouse = sample.destinationHouse,
-                        passCode = sample.passCode,
-                        passTypeLabel = sample.passTypeLabel,
-                        vehiclePlate = sample.vehiclePlate,
-                        status = sample.status.name,
-                        timestampMillis = sample.timestampMillis,
-                        guardNotes = sample.guardNotes
-                    )
-                )
-            }
-        }
+        qrPassRepository.seedInitialPassesIfEmpty()
+        repository.seedInitialCheckInsIfEmpty()
     }
 
     val visitorEntries = remember(roomCheckIns) {
@@ -151,154 +177,174 @@ fun SecurityScannerScreen() {
     var showQrGeneratorDialog by remember { mutableStateOf(false) }
     var manualCodeInput by remember { mutableStateOf("") }
     var activePanicAlert by remember { mutableStateOf<PanicAlertEvent?>(null) }
+    var showFirebaseCloudDialog by remember { mutableStateOf(false) }
+    var showSplash by remember { mutableStateOf(true) }
+    var showPhilosophyDialog by remember { mutableStateOf(false) }
 
     fun verifyPassCode(code: String) {
         triggerScanHaptic(context)
-        val result = SamplePassRepository.verifyCode(code)
-        activeVerificationResult = result
+        scope.launch {
+            val result = qrPassRepository.verifyPassCode(code)
+            activeVerificationResult = result
+        }
     }
 
-    Scaffold(
-        containerColor = NavyDark,
-        bottomBar = {
-            NavigationBar(
-                containerColor = NavySurface,
-                tonalElevation = 8.dp,
-                modifier = Modifier.testTag("main_bottom_navigation")
-            ) {
-                ActiveScreenTab.values().forEach { tab ->
-                    val isSelected = currentTab == tab
-                    NavigationBarItem(
-                        selected = isSelected,
-                        onClick = { currentTab = tab },
-                        icon = {
-                            if (tab == ActiveScreenTab.HISTORY && roomCheckIns.isNotEmpty()) {
-                                BadgedBox(
-                                    badge = {
-                                        Badge(
-                                            containerColor = GoldPrimary,
-                                            contentColor = NavyDark
-                                        ) {
-                                            Text("${roomCheckIns.size}", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            containerColor = NavyDark,
+            bottomBar = {
+                NavigationBar(
+                    containerColor = NavySurface,
+                    tonalElevation = 8.dp,
+                    modifier = Modifier.testTag("main_bottom_navigation")
+                ) {
+                    ActiveScreenTab.values().forEach { tab ->
+                        val isSelected = currentTab == tab
+                        NavigationBarItem(
+                            selected = isSelected,
+                            onClick = { currentTab = tab },
+                            icon = {
+                                if (tab == ActiveScreenTab.HISTORY && roomCheckIns.isNotEmpty()) {
+                                    BadgedBox(
+                                        badge = {
+                                            Badge(
+                                                containerColor = GoldPrimary,
+                                                contentColor = NavyDark
+                                            ) {
+                                                Text("${roomCheckIns.size}", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                            }
                                         }
+                                    ) {
+                                        Icon(
+                                            imageVector = tab.icon,
+                                            contentDescription = tab.label,
+                                            modifier = Modifier.size(20.dp)
+                                        )
                                     }
-                                ) {
+                                } else {
                                     Icon(
                                         imageVector = tab.icon,
                                         contentDescription = tab.label,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
-                            } else {
-                                Icon(
-                                    imageVector = tab.icon,
-                                    contentDescription = tab.label,
-                                    modifier = Modifier.size(20.dp)
+                            },
+                            label = {
+                                Text(
+                                    text = tab.label,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1
                                 )
-                            }
-                        },
-                        label = {
-                            Text(
-                                text = tab.label,
-                                fontSize = 10.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1
-                            )
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon else NavyDark,
-                            selectedTextColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon else GoldPrimary,
-                            indicatorColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon.copy(alpha = 0.2f) else GoldPrimary,
-                            unselectedIconColor = Color.Gray,
-                            unselectedTextColor = Color.Gray
-                        ),
-                        modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
-                    )
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon else NavyDark,
+                                selectedTextColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon else GoldPrimary,
+                                indicatorColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon.copy(alpha = 0.2f) else GoldPrimary,
+                                unselectedIconColor = Color.Gray,
+                                unselectedTextColor = Color.Gray
+                            ),
+                            modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
+                        )
+                    }
                 }
             }
-        }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(horizontal = 14.dp)
-        ) {
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Guard Header & Station Status
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = NavySurface,
-                border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.6f))
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(horizontal = 14.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Brand Hero Banner with Golden Crest, Slogan & Live Status
+                BrandHeaderHeroBanner(
+                    onOpenPhilosophyModal = { showPhilosophyDialog = true }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Quick Security Action Bar (Panic Button & Battery Status)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = NavySurface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(GoldPrimary, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Shield,
-                                contentDescription = null,
-                                tint = NavyDark,
-                                modifier = Modifier.size(18.dp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(SuccessGreen, CircleShape)
                             )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "MEDUSA ALFHA • SEGURIDAD",
-                                color = GoldPrimary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = 0.8.sp
-                            )
-                            Text(
-                                text = "Control de Accesos Garita",
+                                text = "Control Garita Principal • Fuente Única Room",
                                 color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
-                    }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        PulsingPanicButton(
-                            isActive = activePanicAlert != null,
-                            onClick = {
-                                if (activePanicAlert == null) {
-                                    activePanicAlert = com.example.ui.components.SampleCondoUnits.getDefaultPanicEvent()
-                                    Toast.makeText(context, "🚨 ALERTA DE PÁNICO ACTIVADA EN MANZANA A - CASA 104", Toast.LENGTH_LONG).show()
-                                } else {
-                                    activePanicAlert = null
-                                    Toast.makeText(context, "Alerta de pánico desactivada", Toast.LENGTH_SHORT).show()
-                                }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            com.example.ui.components.ConnectivityStatusPill(showPendingBadge = true)
+
+                            IconButton(
+                                onClick = { showFirebaseCloudDialog = true },
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(GoldPrimary.copy(alpha = 0.15f), CircleShape)
+                                    .testTag("firebase_cloud_sync_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudSync,
+                                    contentDescription = "Firebase Cloud Sync",
+                                    tint = GoldPrimary,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
-                        )
 
-                        com.example.ui.components.BatteryIndicatorPill(showDetailedLabel = false)
+                            PulsingPanicButton(
+                                isActive = activePanicAlert != null,
+                                onClick = {
+                                    if (activePanicAlert == null) {
+                                        activePanicAlert = com.example.ui.components.SampleCondoUnits.getDefaultPanicEvent()
+                                        scope.launch {
+                                            EmergencyLocationEngine.triggerEmergencyAlert(
+                                                context = context,
+                                                db = db,
+                                                emergencyType = "PÁNICO S.O.S.",
+                                                locationName = "Manzana A - Casa 104",
+                                                reportedBy = "Guardia de Garita 1",
+                                                reportedByRole = "GUARDIA",
+                                                details = "Alerta de pánico activada desde la consola táctica de Caseta."
+                                            )
+                                        }
+                                        Toast.makeText(context, "🚨 ALERTA DE PÁNICO ACTIVADA CON GEOLOCALIZACIÓN GPS", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        activePanicAlert = null
+                                        Toast.makeText(context, "Alerta de pánico desactivada", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+
+                            com.example.ui.components.BatteryIndicatorPill(showDetailedLabel = false)
+                        }
                     }
                 }
-            }
 
-            Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
             when (currentTab) {
                 ActiveScreenTab.SCANNER -> {
@@ -306,22 +352,13 @@ fun SecurityScannerScreen() {
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        // Interactive Floor-Plan Map for Panic Alerts (displayed with high priority when triggered)
+                        // Interactive Operational Map for Emergencies and Geolocation
                         if (activePanicAlert != null) {
                             item {
-                                PanicFloorPlanCard(
-                                    activeAlert = activePanicAlert,
-                                    onSimulatePanicTrigger = { unit ->
-                                        activePanicAlert = PanicAlertEvent(
-                                            id = "PANIC-${System.currentTimeMillis() % 10000}",
-                                            unit = unit,
-                                            alertType = "🚨 ALERTA DE PÁNICO RESIDENCIAL",
-                                            severity = "CRÍTICO",
-                                            timestamp = "Reciente"
-                                        )
-                                        Toast.makeText(context, "🚨 Alerta disparada en ${unit.unitId} (${unit.residentName})", Toast.LENGTH_LONG).show()
-                                    },
-                                    onResolveAlert = {
+                                OperationalEmergencyMapView(
+                                    db = db,
+                                    userRole = "GUARDIA",
+                                    onEmergencyResolvedOrClosed = {
                                         activePanicAlert = null
                                     }
                                 )
@@ -344,7 +381,7 @@ fun SecurityScannerScreen() {
                                         letterSpacing = 1.sp
                                     )
                                     Text(
-                                        text = "CameraX & ZXing",
+                                        text = "CameraX & Room DB",
                                         color = CyanNeon,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium
@@ -374,7 +411,7 @@ fun SecurityScannerScreen() {
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Text(
-                                        text = "BÚSQUEDA MANUAL DE CÓDIGO QR",
+                                        text = "BÚSQUEDA MANUAL DE CÓDIGO QR / FOLIO",
                                         color = TextMuted,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold
@@ -388,7 +425,7 @@ fun SecurityScannerScreen() {
                                         OutlinedTextField(
                                             value = manualCodeInput,
                                             onValueChange = { manualCodeInput = it },
-                                            placeholder = { Text("Ej: MEDUSA-PASS-101", color = Color.Gray, fontSize = 13.sp) },
+                                            placeholder = { Text("Ej: MED-20260821-1001", color = Color.Gray, fontSize = 13.sp) },
                                             singleLine = true,
                                             colors = OutlinedTextFieldDefaults.colors(
                                                 focusedBorderColor = GoldPrimary,
@@ -423,11 +460,11 @@ fun SecurityScannerScreen() {
                             }
                         }
 
-                        // Quick Scan Preset Bar
+                        // Quick Scan Preset Bar from Room DB
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
-                                    text = "PRUEBAS RÁPIDAS DE PASES REGISTRADOS",
+                                    text = "PRUEBAS RÁPIDAS DE PASES ROOM (${roomPasses.size})",
                                     color = TextMuted,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
@@ -436,10 +473,11 @@ fun SecurityScannerScreen() {
                                 LazyRow(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    items(SamplePassRepository.getAllKnownPasses()) { pass ->
+                                    items(roomPasses) { passRoom ->
+                                        val passEntity = passRoom.toQrPassEntity()
                                         QuickPassChip(
-                                            pass = pass,
-                                            onClick = { verifyPassCode(pass.passCode) }
+                                            pass = passEntity,
+                                            onClick = { verifyPassCode(passRoom.passCode) }
                                         )
                                     }
                                     item {
@@ -469,14 +507,40 @@ fun SecurityScannerScreen() {
                                     val idLong = entry.id.toLongOrNull()
                                     if (idLong != null) {
                                         scope.launch {
-                                            repository.updateCheckInStatus(
-                                                id = idLong,
-                                                status = newStatus.name,
-                                                notes = if (newStatus == VisitorStatus.VERIFIED) "Entrada verificada en Room DB por agente" else "Entrada rechazada en Room DB por agente"
-                                            )
+                                            if (newStatus == VisitorStatus.DEPARTED) {
+                                                repository.registerCheckOut(idLong, notes = "Salida confirmada en garita")
+                                            } else {
+                                                repository.updateCheckInStatus(
+                                                    id = idLong,
+                                                    status = newStatus.name,
+                                                    notes = if (newStatus == VisitorStatus.VERIFIED) "Entrada verificada en Room DB" else "Entrada denegada en Room DB"
+                                                )
+                                            }
                                         }
-                                        val statusMsg = if (newStatus == VisitorStatus.VERIFIED) "Verificado" else "Denegado"
-                                        Toast.makeText(context, "Room DB Actualizado: $statusMsg (${entry.visitorName})", Toast.LENGTH_SHORT).show()
+                                        if (newStatus == VisitorStatus.VERIFIED) {
+                                            ResidentNotificationManager.notifyCustomVisitorEntry(
+                                                context = context,
+                                                guestName = entry.visitorName,
+                                                destinationHouse = entry.destinationHouse,
+                                                hostResidentName = entry.hostResidentName,
+                                                passTypeLabel = entry.passTypeLabel,
+                                                vehiclePlate = entry.vehiclePlate
+                                            )
+                                            scope.launch {
+                                                SmartNotificationHub.notifyVisitorEntry(
+                                                    context = context,
+                                                    db = db,
+                                                    guestName = entry.visitorName,
+                                                    unitId = entry.destinationHouse,
+                                                    hostResidentName = entry.hostResidentName,
+                                                    passTypeLabel = entry.passTypeLabel,
+                                                    vehiclePlate = entry.vehiclePlate,
+                                                    passFolio = entry.folio
+                                                )
+                                            }
+                                        }
+                                        val statusMsg = if (newStatus == VisitorStatus.VERIFIED) "Verificado y Notificado al Residente" else if (newStatus == VisitorStatus.DEPARTED) "Salida Registrada" else "Denegado"
+                                        Toast.makeText(context, "Room DB: $statusMsg (${entry.visitorName})", Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             )
@@ -486,6 +550,12 @@ fun SecurityScannerScreen() {
                             Spacer(modifier = Modifier.height(24.dp))
                         }
                     }
+                }
+
+                ActiveScreenTab.VALIDATION -> {
+                    FieldValidationChecklistHub(
+                        db = db
+                    )
                 }
 
                 ActiveScreenTab.GENERATOR -> {
@@ -504,14 +574,56 @@ fun SecurityScannerScreen() {
                             val idLong = entry.id.toLongOrNull()
                             if (idLong != null) {
                                 scope.launch {
-                                    repository.updateCheckInStatus(
-                                        id = idLong,
-                                        status = newStatus.name,
-                                        notes = if (newStatus == VisitorStatus.VERIFIED) "Entrada verificada por agente" else "Entrada rechazada por agente"
+                                    if (newStatus == VisitorStatus.DEPARTED) {
+                                        repository.registerCheckOut(idLong, notes = "Salida confirmada en garita con 1 toque")
+                                        val duration = entry.durationStay ?: "Normal"
+                                        ResidentNotificationManager.notifyVisitorDeparted(
+                                            context = context,
+                                            guestName = entry.visitorName,
+                                            destinationHouse = entry.destinationHouse,
+                                            hostResidentName = entry.hostResidentName,
+                                            durationStay = duration
+                                        )
+                                        SmartNotificationHub.notifyVisitorExit(
+                                            context = context,
+                                            db = db,
+                                            guestName = entry.visitorName,
+                                            unitId = entry.destinationHouse,
+                                            hostResidentName = entry.hostResidentName,
+                                            durationStay = duration,
+                                            checkInFolio = entry.folio
+                                        )
+                                        db.auditLogDao().insertAuditLog(
+                                            AuditLogEntity(
+                                                folio = AlphaCoreEngine.generateUniqueFolio("AUD"),
+                                                operatorName = "Guardia Garita 1",
+                                                actionType = "CHECK_OUT_ONE_TOUCH",
+                                                location = "Garita Principal",
+                                                targetEntity = "${entry.visitorName} (${entry.folio})",
+                                                changeDetails = "Salida táctica de 1 toque. Permanencia: $duration",
+                                                resultStatus = "EXITOSO"
+                                            )
+                                        )
+                                    } else {
+                                        repository.updateCheckInStatus(
+                                            id = idLong,
+                                            status = newStatus.name,
+                                            notes = if (newStatus == VisitorStatus.VERIFIED) "Entrada verificada por agente" else "Entrada rechazada por agente"
+                                        )
+                                    }
+                                }
+                                if (newStatus == VisitorStatus.VERIFIED) {
+                                    ResidentNotificationManager.notifyCustomVisitorEntry(
+                                        context = context,
+                                        guestName = entry.visitorName,
+                                        destinationHouse = entry.destinationHouse,
+                                        hostResidentName = entry.hostResidentName,
+                                        passTypeLabel = entry.passTypeLabel,
+                                        vehiclePlate = entry.vehiclePlate
                                     )
                                 }
-                                val statusMsg = if (newStatus == VisitorStatus.VERIFIED) "Verificado" else "Denegado"
-                                Toast.makeText(context, "Estado actualizado en Room DB: $statusMsg", Toast.LENGTH_SHORT).show()
+                                val statusMsg = if (newStatus == VisitorStatus.VERIFIED) "Verificado y Notificado al Residente" else if (newStatus == VisitorStatus.DEPARTED) "Salida Registrada y Notificado al Residente" else "Denegado"
+                                Toast.makeText(context, "Estado actualizado: $statusMsg", Toast.LENGTH_SHORT).show()
                             }
                         },
                         onClearHistory = {
@@ -521,6 +633,68 @@ fun SecurityScannerScreen() {
                             Toast.makeText(context, "Historial de Room DB borrado", Toast.LENGTH_SHORT).show()
                         }
                     )
+                }
+
+                ActiveScreenTab.VEHICLES -> {
+                    VehicleAccessControlHub(
+                        db = db,
+                        userRole = "CASETA",
+                        showNewVehicleFab = true
+                    )
+                }
+
+                ActiveScreenTab.RESIDENTS -> {
+                    ResidentManagementHub(
+                        db = db,
+                        onNavigateToQrGenerator = { unit, resident ->
+                            currentTab = ActiveScreenTab.GENERATOR
+                        },
+                        onNavigateToPackages = { unit, resident ->
+                            currentTab = ActiveScreenTab.PACKAGES
+                        },
+                        onNavigateToBookings = { unit ->
+                            currentTab = ActiveScreenTab.AMENITIES
+                        }
+                    )
+                }
+
+                ActiveScreenTab.MAINTENANCE -> {
+                    com.example.ui.components.MaintenanceHub(
+                        db = db,
+                        showNewOrderFab = true,
+                        userRole = "SUPERVISOR"
+                    )
+                }
+
+                ActiveScreenTab.AMENITIES -> {
+                    AmenityBookingHub(
+                        db = db,
+                        canManage = true
+                    )
+                }
+
+                ActiveScreenTab.PACKAGES -> {
+                    PackageCenterHub(
+                        db = db,
+                        canRegister = true,
+                        canDeliver = true
+                    )
+                }
+
+                ActiveScreenTab.INCIDENTS -> {
+                    IncidentCenterHub(
+                        db = db,
+                        initialRoleFilter = "CASETA",
+                        showRoleSelector = true
+                    )
+                }
+
+                ActiveScreenTab.SUPERVISION -> {
+                    com.example.ui.screens.TacticalSupervisionScreen()
+                }
+
+                ActiveScreenTab.MASTER_ALPHA -> {
+                    com.example.ui.screens.MasterPanelAlphaScreen()
                 }
 
                 ActiveScreenTab.ANALYTICS -> {
@@ -540,43 +714,134 @@ fun SecurityScannerScreen() {
                 onConfirmEntry = {
                     val pass = result.qrPass
                     if (pass != null) {
-                        SamplePassRepository.markPassAsUsed(pass.passCode)
+                        val unifiedFolio = if (pass.passCode.startsWith("MED-")) pass.passCode else AlphaCoreEngine.generateUniqueFolio("MED")
                         scope.launch {
-                            repository.insertCheckIn(
-                                VisitorCheckIn(
-                                    visitorName = pass.guestName,
-                                    visitorDocument = pass.guestDocument,
-                                    destinationHouse = pass.destinationHouse,
-                                    passCode = pass.passCode,
-                                    passTypeLabel = pass.passType.label,
-                                    vehiclePlate = pass.vehiclePlate,
-                                    status = "VERIFICADO",
-                                    guardNotes = "Ingreso Verificado con Escáner CameraX"
-                                )
+                            val outcome = AlfhaSecurityContext.enforcePermission(
+                                db = db,
+                                permission = AlfhaPermission.CREAR,
+                                actionName = "Validar Entrada Visitante QR $unifiedFolio",
+                                targetResource = pass.guestName,
+                                location = "Garita Principal"
                             )
+                            when (outcome) {
+                                is RbacValidationOutcome.Granted -> {
+                                    qrPassRepository.markPassAsUsed(pass.passCode)
+                                    repository.insertCheckIn(
+                                        VisitorCheckIn(
+                                            folio = unifiedFolio,
+                                            visitorName = pass.guestName,
+                                            visitorDocument = pass.guestDocument,
+                                            destinationHouse = pass.destinationHouse,
+                                            passCode = pass.passCode,
+                                            passTypeLabel = pass.passType.label,
+                                            vehiclePlate = pass.vehiclePlate,
+                                            status = "CHECKED_IN",
+                                            guardNotes = "Ingreso Verificado y Autorizado con Escáner CameraX",
+                                            hostResidentName = pass.hostResidentName
+                                        )
+                                    )
+                                    db.auditLogDao().insertAuditLog(
+                                        AuditLogEntity(
+                                            folio = AlphaCoreEngine.generateUniqueFolio("AUD"),
+                                            operatorName = "${outcome.user.name} (${outcome.user.alfhaRole.shortName})",
+                                            actionType = "CHECK_IN_AUTHORIZED",
+                                            location = "Garita Principal",
+                                            targetEntity = "${pass.guestName} -> ${pass.destinationHouse} ($unifiedFolio)",
+                                            changeDetails = "Ingreso QR validado. Folio unificado: $unifiedFolio",
+                                            resultStatus = "EXITOSO"
+                                        )
+                                    )
+
+                                    // Encolar para Sincronización Persistente Offline (FASE 19)
+                                    try {
+                                        com.example.data.sync.OfflineSyncEngine.enqueueOperation(
+                                            db = db,
+                                            operationType = "CHECK_IN",
+                                            targetFolio = unifiedFolio,
+                                            targetModule = "VISITANTES",
+                                            payloadJson = "{\"folio\":\"$unifiedFolio\",\"guest\":\"${pass.guestName}\",\"doc\":\"${pass.guestDocument}\",\"unit\":\"${pass.destinationHouse}\",\"status\":\"CHECKED_IN\"}",
+                                            operatorName = outcome.user.name,
+                                            operatorRole = outcome.user.alfhaRole.shortName,
+                                            locationName = "Garita Principal",
+                                            deviceGateId = "Caseta 1 - Terminal Principal"
+                                        )
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("SecurityScannerScreen", "Error enqueuing sync: ${e.message}")
+                                    }
+
+                                    // Send push notification automatically to the resident
+                                    ResidentNotificationManager.notifyResidentVisitorCheckedIn(
+                                        context = context,
+                                        pass = pass,
+                                        guardNotes = "Ingreso Verificado con Escáner CameraX en Garita Principal"
+                                    )
+                                    SmartNotificationHub.notifyVisitorEntry(
+                                        context = context,
+                                        db = db,
+                                        guestName = pass.guestName,
+                                        unitId = pass.destinationHouse,
+                                        hostResidentName = pass.hostResidentName,
+                                        passTypeLabel = pass.passType.label,
+                                        vehiclePlate = pass.vehiclePlate,
+                                        passFolio = unifiedFolio
+                                    )
+
+                                    Toast.makeText(context, "✅ Ingreso Guardado en Room [$unifiedFolio] y Notificación Enviada", Toast.LENGTH_LONG).show()
+                                }
+                                is RbacValidationOutcome.Denied -> {
+                                    Toast.makeText(context, "🚫 ${outcome.reason}", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }
-                        Toast.makeText(context, "✅ Ingreso Guardado en Base de Datos Room: ${pass.guestName}", Toast.LENGTH_LONG).show()
                     }
                     activeVerificationResult = null
                 },
                 onDenyEntry = {
                     val pass = result.qrPass
                     if (pass != null) {
+                        val unifiedFolio = if (pass.passCode.startsWith("MED-")) pass.passCode else AlphaCoreEngine.generateUniqueFolio("MED")
                         scope.launch {
-                            repository.insertCheckIn(
-                                VisitorCheckIn(
-                                    visitorName = pass.guestName,
-                                    visitorDocument = pass.guestDocument,
-                                    destinationHouse = pass.destinationHouse,
-                                    passCode = pass.passCode,
-                                    passTypeLabel = pass.passType.label,
-                                    vehiclePlate = pass.vehiclePlate,
-                                    status = "DENEGADO",
-                                    guardNotes = "Acceso Denegado con Escáner CameraX"
-                                )
+                            val outcome = AlfhaSecurityContext.enforcePermission(
+                                db = db,
+                                permission = AlfhaPermission.CREAR,
+                                actionName = "Rechazar Entrada Visitante $unifiedFolio",
+                                targetResource = pass.guestName,
+                                location = "Garita Principal"
                             )
+                            when (outcome) {
+                                is RbacValidationOutcome.Granted -> {
+                                    repository.insertCheckIn(
+                                        VisitorCheckIn(
+                                            folio = unifiedFolio,
+                                            visitorName = pass.guestName,
+                                            visitorDocument = pass.guestDocument,
+                                            destinationHouse = pass.destinationHouse,
+                                            passCode = pass.passCode,
+                                            passTypeLabel = pass.passType.label,
+                                            vehiclePlate = pass.vehiclePlate,
+                                            status = "DENEGADO",
+                                            guardNotes = "Acceso Denegado con Escáner CameraX",
+                                            hostResidentName = pass.hostResidentName
+                                        )
+                                    )
+                                    db.auditLogDao().insertAuditLog(
+                                        AuditLogEntity(
+                                            folio = AlphaCoreEngine.generateUniqueFolio("AUD"),
+                                            operatorName = "${outcome.user.name} (${outcome.user.alfhaRole.shortName})",
+                                            actionType = "CHECK_IN_DENIED",
+                                            location = "Garita Principal",
+                                            targetEntity = "${pass.guestName} -> ${pass.destinationHouse} ($unifiedFolio)",
+                                            changeDetails = "Acceso rechazado por guardia en garita",
+                                            resultStatus = "DENEGADO"
+                                        )
+                                    )
+                                    Toast.makeText(context, "🚫 Rechazo Almacenado en Room DB: ${pass.guestName}", Toast.LENGTH_SHORT).show()
+                                }
+                                is RbacValidationOutcome.Denied -> {
+                                    Toast.makeText(context, "🚫 ${outcome.reason}", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         }
-                        Toast.makeText(context, "🚫 Rechazo Almacenado en Room DB: ${pass.guestName}", Toast.LENGTH_SHORT).show()
                     }
                     activeVerificationResult = null
                 },
@@ -593,6 +858,33 @@ fun SecurityScannerScreen() {
                 onDismiss = { showQrGeneratorDialog = false }
             )
         }
+    }
+
+    // Philosophy & Brand Mission Dialog (Tiempo = Familia)
+    if (showPhilosophyDialog) {
+        BrandPhilosophyDialog(
+            onDismiss = { showPhilosophyDialog = false }
+        )
+    }
+
+    // Firebase Cloud Sync & Authentication Dialog
+    if (showFirebaseCloudDialog) {
+        FirebaseCloudSyncDialog(
+            db = db,
+            onDismiss = { showFirebaseCloudDialog = false }
+        )
+    }
+
+    // Startup Splash Screen Animation
+    AnimatedVisibility(
+        visible = showSplash,
+        enter = fadeIn(androidx.compose.animation.core.tween(300)),
+        exit = fadeOut(androidx.compose.animation.core.tween(500))
+    ) {
+        BrandSplashScreen(
+            onDismiss = { showSplash = false }
+        )
+    }
     }
 }
 

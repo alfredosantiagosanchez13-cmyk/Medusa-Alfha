@@ -38,14 +38,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.data.booking.AppDatabase
+import com.example.data.core.AlphaCoreEngine
+import com.example.data.passes.QrPassRoomEntity
 import com.example.scanner.PassType
 import com.example.scanner.QrPassEntity
-import com.example.scanner.SamplePassRepository
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.GoldPrimary
 import com.example.ui.theme.NavyCard
@@ -54,15 +57,22 @@ import com.example.ui.theme.NavySurface
 import com.example.ui.theme.TextMuted
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @Composable
 fun QrGeneratorDialog(
     onSimulateScan: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val db = remember { AppDatabase.getDatabase(context) }
+    val qrPassDao = remember { db.qrPassDao() }
+
     var guestName by remember { mutableStateOf("Roberto D'Amico") }
     var destinationHouse by remember { mutableStateOf("Casa #204") }
-    var passCode by remember { mutableStateOf("MEDUSA-PASS-${(200..999).random()}") }
+    var passCode by remember { mutableStateOf(AlphaCoreEngine.generateUniqueFolio("MED")) }
 
     var qrBitmap by remember { mutableStateOf<Bitmap?>(generateQrBitmap(passCode)) }
 
@@ -191,18 +201,24 @@ fun QrGeneratorDialog(
                 ) {
                     Button(
                         onClick = {
-                            val newCode = "MEDUSA-PASS-${(200..999).random()}"
+                            val newCode = AlphaCoreEngine.generateUniqueFolio("MED")
                             passCode = newCode
-                            val customPass = QrPassEntity(
+                            val guestDoc = "20.${(100..999).random()}.${(100..999).random()}-K"
+                            val destHouse = destinationHouse.ifBlank { "Casa #101" }
+                            val gName = guestName.ifBlank { "Invitado de Prueba" }
+                            val roomEntity = QrPassRoomEntity(
                                 passCode = newCode,
-                                guestName = guestName.ifBlank { "Invitado de Prueba" },
-                                guestDocument = "20.${(100..999).random()}.${(100..999).random()}-K",
-                                destinationHouse = destinationHouse.ifBlank { "Casa #101" },
+                                guestName = gName,
+                                guestDocument = guestDoc,
+                                destinationHouse = destHouse,
                                 hostResidentName = "Residente Propietario",
                                 passType = PassType.VISITOR_SINGLE,
-                                validUntilMillis = System.currentTimeMillis() + (6 * 3600 * 1000)
+                                validUntilMillis = System.currentTimeMillis() + (6 * 3600 * 1000),
+                                integrityHash = AlphaCoreEngine.computeIntegrityHash(newCode, guestDoc, destHouse)
                             )
-                            SamplePassRepository.addCustomPass(customPass)
+                            CoroutineScope(Dispatchers.IO).launch {
+                                qrPassDao.insertPass(roomEntity)
+                            }
                             qrBitmap = generateQrBitmap(newCode)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = NavyCard, contentColor = GoldPrimary),
@@ -216,17 +232,23 @@ fun QrGeneratorDialog(
 
                     Button(
                         onClick = {
-                            // Register in repository & trigger immediate scan test
-                            val customPass = QrPassEntity(
+                            // Register in Room repository & trigger immediate scan test
+                            val guestDoc = "20.123.456-7"
+                            val destHouse = destinationHouse.ifBlank { "Casa #101" }
+                            val gName = guestName.ifBlank { "Invitado de Prueba" }
+                            val roomEntity = QrPassRoomEntity(
                                 passCode = passCode,
-                                guestName = guestName.ifBlank { "Invitado de Prueba" },
-                                guestDocument = "20.123.456-7",
-                                destinationHouse = destinationHouse.ifBlank { "Casa #101" },
+                                guestName = gName,
+                                guestDocument = guestDoc,
+                                destinationHouse = destHouse,
                                 hostResidentName = "Residente Propietario",
                                 passType = PassType.VISITOR_SINGLE,
-                                validUntilMillis = System.currentTimeMillis() + (6 * 3600 * 1000)
+                                validUntilMillis = System.currentTimeMillis() + (6 * 3600 * 1000),
+                                integrityHash = AlphaCoreEngine.computeIntegrityHash(passCode, guestDoc, destHouse)
                             )
-                            SamplePassRepository.addCustomPass(customPass)
+                            CoroutineScope(Dispatchers.IO).launch {
+                                qrPassDao.insertPass(roomEntity)
+                            }
                             onSimulateScan(passCode)
                             onDismiss()
                         },

@@ -6,20 +6,32 @@ import android.content.pm.PackageManager
 import android.hardware.camera2.CameraManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Surface
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.data.booking.AppDatabase
+import com.example.data.sync.OfflineSyncEngine
+import com.example.ui.components.DebugDiagnosticOverlay
 import com.example.ui.screens.SecurityScannerScreen
 import com.example.ui.theme.MEDUSAALFHATheme
+import com.example.data.notifications.SmartNotificationHub
 import com.example.ui.theme.NavyDark
+import com.example.utils.AmenityReminderManager
+import com.example.utils.ResidentNotificationManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,12 +42,51 @@ class MainActivity : FragmentActivity() {
         private const val TAG = "AppDiagnostic"
     }
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        Log.i(TAG, "🔔 Notification permission granted: $isGranted")
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Execute system diagnostics on launch to log Camera, Database, and Network status
+        // Initialize Notification Channels for Resident Check-ins, Amenity Reminders, and Smart Event Notifications
+        try {
+            SmartNotificationHub.initializeChannels(this)
+            ResidentNotificationManager.createNotificationChannel(this)
+            AmenityReminderManager.createNotificationChannel(this)
+        } catch (e: Exception) {
+            Log.e(TAG, "Notification channel creation failed: ${e.message}", e)
+        }
+
+        // Request POST_NOTIFICATIONS on Android 13+ inside try-catch block
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Notification permission request failed: ${e.message}", e)
+        }
+
+        // Execute system diagnostics on launch to log Camera, Database, Firebase, and Network status
         runSystemDiagnostics()
+
+        // FASE 19: Inicializar Motor de Sincronización Automática Offline/Online
+        try {
+            val appDb = AppDatabase.getDatabase(this)
+            OfflineSyncEngine.initializeAutoSync(this, appDb)
+            Log.i(TAG, "🔄 OfflineSyncEngine initialized: Auto-sync on network reconnection active")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize OfflineSyncEngine: ${e.message}", e)
+        }
 
         setContent {
             MEDUSAALFHATheme {
@@ -43,7 +94,15 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = NavyDark
                 ) {
-                    SecurityScannerScreen()
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        SecurityScannerScreen()
+                        DebugDiagnosticOverlay(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .statusBarsPadding()
+                                .padding(top = 8.dp, end = 14.dp)
+                        )
+                    }
                 }
             }
         }
@@ -66,11 +125,28 @@ class MainActivity : FragmentActivity() {
         val networkStatus = checkNetworkDiagnostic()
         Log.i(TAG, "🌐 NETWORK STATUS: $networkStatus")
 
-        // 3. Database Diagnostic Check (performed asynchronously to prevent main-thread I/O blocking)
+        // 3. Firebase & Cloud Services Diagnostic Check
+        val firebaseStatus = checkFirebaseDiagnostic()
+        Log.i(TAG, "☁️ FIREBASE / CLOUD STATUS: $firebaseStatus")
+
+        // 4. Database Diagnostic Check (performed asynchronously to prevent main-thread I/O blocking)
         lifecycleScope.launch {
             val dbStatus = checkDatabaseDiagnostic()
             Log.i(TAG, "🗄️ DATABASE STATUS: $dbStatus")
             Log.i(TAG, "================ [ DIAGNOSTIC COMPLETED ] ================")
+        }
+    }
+
+    private fun checkFirebaseDiagnostic(): String {
+        return try {
+            val isAvailable = MedusaApplication.isFirebaseAvailable
+            if (isAvailable) {
+                "Firebase initialized and active"
+            } else {
+                "Firebase unconfigured or offline mode active (Safe fallback)"
+            }
+        } catch (e: Exception) {
+            "Firebase diagnostic exception (handled safely): ${e.message}"
         }
     }
 

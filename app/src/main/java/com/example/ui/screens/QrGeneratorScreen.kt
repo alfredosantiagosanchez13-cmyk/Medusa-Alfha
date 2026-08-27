@@ -35,18 +35,13 @@ import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Security
-import androidx.fragment.app.FragmentActivity
-import com.example.auth.BiometricAuthManager
-import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.NoteAdd
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -61,9 +56,12 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,9 +72,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
+import com.example.auth.BiometricAuthManager
+import com.example.data.booking.AppDatabase
+import com.example.data.core.AlphaCoreEngine
+import com.example.data.passes.QrPassRepository
+import com.example.data.passes.QrPassRoomEntity
+import com.example.data.passes.toQrPassEntity
 import com.example.scanner.PassType
 import com.example.scanner.QrPassEntity
-import com.example.scanner.SamplePassRepository
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.GoldPrimary
 import com.example.ui.theme.NavyCard
@@ -86,6 +90,7 @@ import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -96,6 +101,17 @@ fun QrGeneratorScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val db = remember { AppDatabase.getDatabase(context) }
+    val qrPassDao = remember { db.qrPassDao() }
+    val qrPassRepository = remember { QrPassRepository(qrPassDao) }
+
+    LaunchedEffect(Unit) {
+        qrPassRepository.seedInitialPassesIfEmpty()
+    }
+
+    val roomPasses by qrPassRepository.allPassesFlow.collectAsState(initial = emptyList())
 
     var selectedPassType by remember { mutableStateOf(PassType.VISITOR_SINGLE) }
     var guestName by remember { mutableStateOf("Carlos Valenzuela") }
@@ -109,10 +125,7 @@ fun QrGeneratorScreen(
     var validityHours by remember { mutableStateOf(12) } // default 12h
     var maxEntries by remember { mutableStateOf(1) } // default 1
 
-    var passCode by remember { mutableStateOf(generatePassCode(selectedPassType)) }
-    var generatedPassList by remember {
-        mutableStateOf(SamplePassRepository.getAllKnownPasses().reversed())
-    }
+    var passCode by remember { mutableStateOf(AlphaCoreEngine.generateUniqueFolio("MED")) }
 
     var qrBitmap by remember(passCode) {
         mutableStateOf(createQrCodeBitmap(passCode))
@@ -139,7 +152,6 @@ fun QrGeneratorScreen(
                 },
                 onError = { errMessage ->
                     Toast.makeText(context, errMessage, Toast.LENGTH_SHORT).show()
-                    // Allow seamless fallback for devices/emulators without enrolled biometrics
                     isBiometricVerified = true
                     onSuccess()
                 }
@@ -151,13 +163,13 @@ fun QrGeneratorScreen(
     }
 
     fun refreshPassCode() {
-        passCode = generatePassCode(selectedPassType)
+        passCode = AlphaCoreEngine.generateUniqueFolio("MED")
         qrBitmap = createQrCodeBitmap(passCode)
     }
 
     fun handleRegisterPass() {
         val calculatedValidUntil = System.currentTimeMillis() + (validityHours * 3600 * 1000L)
-        val newPass = QrPassEntity(
+        val newRoomEntity = QrPassRoomEntity(
             passCode = passCode,
             guestName = guestName.ifBlank { "Invitado / Residente" },
             guestDocument = guestDocument.ifBlank { "12.345.678-9" },
@@ -171,10 +183,11 @@ fun QrGeneratorScreen(
             note = note.ifBlank { null }
         )
 
-        SamplePassRepository.addCustomPass(newPass)
-        generatedPassList = SamplePassRepository.getAllKnownPasses().reversed()
+        scope.launch {
+            qrPassRepository.insertPass(newRoomEntity)
+        }
 
-        Toast.makeText(context, "¡Pase $passCode creado con éxito!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "¡Pase $passCode guardado en Room DB!", Toast.LENGTH_SHORT).show()
         showSuccessBanner = true
     }
 
@@ -222,7 +235,7 @@ fun QrGeneratorScreen(
                                     letterSpacing = 1.sp
                                 )
                                 Text(
-                                    text = "Generador de Código QR Acceso",
+                                    text = "Generador de Folios y Códigos QR Room",
                                     color = Color.White,
                                     fontSize = 16.sp,
                                     fontWeight = FontWeight.Bold
@@ -344,7 +357,7 @@ fun QrGeneratorScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "VISTA PREVIA DEL CÓDIGO QR ÚNICO",
+                        text = "FOLIO ÚNICO MEDUSA ALFHA",
                         color = GoldPrimary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
@@ -385,8 +398,8 @@ fun QrGeneratorScreen(
                         letterSpacing = 1.sp
                     )
 
-                    val expTimeStr = SimpleDateFormat("dd/MM/yyyy HH:mm hrs", Locale.getDefault())
-                        .format(Date(System.currentTimeMillis() + (validityHours * 3600 * 1000L)))
+                    val expTimeStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+                        .format(Date(System.currentTimeMillis() + (validityHours * 3600 * 1000L))) + " hrs"
 
                     Text(
                         text = "Válido por $validityHours h (Expira: $expTimeStr)",
@@ -397,7 +410,7 @@ fun QrGeneratorScreen(
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // QR Action Bar: Copy, Share, Simulate
+                    // QR Action Bar: Copy, Save, Simulate
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -525,7 +538,7 @@ fun QrGeneratorScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "DATOS DEL TITULAR / INVITADO",
+                        text = "DATOS DEL TITULAR / INVITADO (CAPTURA ÚNICA)",
                         color = GoldPrimary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold
@@ -727,22 +740,22 @@ fun QrGeneratorScreen(
             }
         }
 
-        // List of Active Generated Passes in System
+        // List of Active Generated Passes in System from Room SQLite
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "PASES GENERADOS EN EL SISTEMA (${generatedPassList.size})",
+                    text = "PASES REGISTRADOS EN BASE DE DATOS ROOM (${roomPasses.size})",
                     color = GoldPrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 1.sp
                 )
 
-                generatedPassList.forEach { pass ->
+                roomPasses.forEach { passRoom ->
                     GeneratedPassItemCard(
-                        pass = pass,
+                        pass = passRoom.toQrPassEntity(),
                         onTestScan = {
-                            onSimulateScan(pass.passCode)
+                            onSimulateScan(passRoom.passCode)
                         }
                     )
                 }
@@ -760,7 +773,6 @@ private fun GeneratedPassItemCard(
     pass: QrPassEntity,
     onTestScan: () -> Unit
 ) {
-    val context = LocalContext.current
     val isExpired = System.currentTimeMillis() > pass.validUntilMillis
 
     Card(
@@ -832,17 +844,6 @@ private fun GeneratedPassItemCard(
             }
         }
     }
-}
-
-private fun generatePassCode(passType: PassType): String {
-    val prefix = when (passType) {
-        PassType.VISITOR_SINGLE -> "GST"
-        PassType.RESIDENT_PERMANENT -> "RES"
-        PassType.DELIVERY_SERVICE -> "DLV"
-        PassType.EVENT_GUEST -> "VIP"
-    }
-    val randomNum = (1000..9999).random()
-    return "MEDUSA-PASS-$prefix-$randomNum"
 }
 
 private fun createQrCodeBitmap(text: String, sizePx: Int = 512): Bitmap? {

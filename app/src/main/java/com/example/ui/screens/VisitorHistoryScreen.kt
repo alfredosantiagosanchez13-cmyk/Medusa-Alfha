@@ -27,16 +27,19 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.House
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -58,10 +61,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +81,9 @@ import com.example.ui.theme.NavySurface
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.WarningOrange
+import kotlinx.coroutines.launch
+
+data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
 
 @Composable
 fun VisitorHistoryScreen(
@@ -92,8 +98,9 @@ fun VisitorHistoryScreen(
     var showClearDialog by remember { mutableStateOf(false) }
     var selectedDetailEntry by remember { mutableStateOf<VisitorEntry?>(null) }
 
+    val insideCount = entries.count { it.status == VisitorStatus.CHECKED_IN || it.status == VisitorStatus.VERIFIED }
+    val departedCount = entries.count { it.status == VisitorStatus.DEPARTED }
     val pendingCount = entries.count { it.status == VisitorStatus.PENDING }
-    val verifiedCount = entries.count { it.status == VisitorStatus.VERIFIED }
     val deniedCount = entries.count { it.status == VisitorStatus.DENIED }
 
     val filteredEntries = entries.filter { entry ->
@@ -102,10 +109,12 @@ fun VisitorHistoryScreen(
                 entry.destinationHouse.contains(searchQuery, ignoreCase = true) ||
                 entry.visitorDocument.contains(searchQuery, ignoreCase = true) ||
                 entry.passCode.contains(searchQuery, ignoreCase = true) ||
+                entry.folio.contains(searchQuery, ignoreCase = true) ||
                 (entry.vehiclePlate?.contains(searchQuery, ignoreCase = true) == true)
 
         val matchesFilter = when (selectedFilter) {
-            "VERIFICADOS" -> entry.status == VisitorStatus.VERIFIED
+            "EN CONDOMINIO" -> entry.status == VisitorStatus.CHECKED_IN || entry.status == VisitorStatus.VERIFIED
+            "SALIDAS" -> entry.status == VisitorStatus.DEPARTED
             "PENDIENTES" -> entry.status == VisitorStatus.PENDING
             "DENEGADOS" -> entry.status == VisitorStatus.DENIED
             else -> true
@@ -149,14 +158,14 @@ fun VisitorHistoryScreen(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "HISTORIAL DE ESCANEOS Y VISITAS",
+                                text = "TRAZABILIDAD Y REGISTRO ROOM",
                                 color = GoldPrimary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 letterSpacing = 1.sp
                             )
                             Text(
-                                text = "Registro de Accesos QR",
+                                text = "Historial Operativo de Accesos",
                                 color = Color.White,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold
@@ -186,21 +195,21 @@ fun VisitorHistoryScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     HistoryKpiBadge(
-                        label = "Total Escaneos",
+                        label = "Total Folios",
                         count = entries.size,
                         color = CyanNeon,
                         modifier = Modifier.weight(1f)
                     )
                     HistoryKpiBadge(
-                        label = "Verificados",
-                        count = verifiedCount,
+                        label = "En Sitio",
+                        count = insideCount,
                         color = SuccessGreen,
                         modifier = Modifier.weight(1f)
                     )
                     HistoryKpiBadge(
-                        label = "Pendientes",
-                        count = pendingCount,
-                        color = WarningOrange,
+                        label = "Salidas",
+                        count = departedCount,
+                        color = Color(0xFF9CA3AF),
                         modifier = Modifier.weight(1f)
                     )
                     HistoryKpiBadge(
@@ -219,7 +228,7 @@ fun VisitorHistoryScreen(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = { searchQuery = it },
-            placeholder = { Text("Buscar por nombre, RUT, casa, vehículo o pase...", color = Color.Gray, fontSize = 12.sp) },
+            placeholder = { Text("Buscar por folio, nombre, RUT, casa o placa...", color = Color.Gray, fontSize = 12.sp) },
             leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = GoldPrimary) },
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
@@ -243,11 +252,11 @@ fun VisitorHistoryScreen(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            listOf("TODOS", "VERIFICADOS", "PENDIENTES", "DENEGADOS").forEach { filter ->
+            listOf("TODOS", "EN CONDOMINIO", "SALIDAS", "PENDIENTES", "DENEGADOS").forEach { filter ->
                 FilterChip(
                     selected = selectedFilter == filter,
                     onClick = { selectedFilter = filter },
-                    label = { Text(filter, fontSize = 10.sp, fontWeight = FontWeight.Bold) },
+                    label = { Text(filter, fontSize = 9.sp, fontWeight = FontWeight.Bold) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = GoldPrimary,
                         selectedLabelColor = NavyDark,
@@ -312,6 +321,7 @@ fun VisitorHistoryScreen(
                     HistoryLogCard(
                         entry = entry,
                         onClick = { selectedDetailEntry = entry },
+                        onCheckOut = { onStatusChange(entry, VisitorStatus.DEPARTED) },
                         onVerify = { onStatusChange(entry, VisitorStatus.VERIFIED) },
                         onDeny = { onStatusChange(entry, VisitorStatus.DENIED) }
                     )
@@ -333,7 +343,7 @@ fun VisitorHistoryScreen(
             },
             text = {
                 Text(
-                    "¿Está seguro de que desea eliminar todos los registros de escaneos y visitas de la sesión actual?",
+                    "¿Está seguro de que desea eliminar todos los registros de escaneos y visitas de la base de datos Room?",
                     color = TextMuted,
                     fontSize = 13.sp
                 )
@@ -406,13 +416,14 @@ private fun HistoryKpiBadge(
 fun HistoryLogCard(
     entry: VisitorEntry,
     onClick: () -> Unit = {},
-    onVerify: () -> Unit,
-    onDeny: () -> Unit
+    onCheckOut: () -> Unit = {},
+    onVerify: () -> Unit = {},
+    onDeny: () -> Unit = {}
 ) {
     val (statusLabel, statusColor, statusIcon) = when (entry.status) {
         VisitorStatus.VERIFIED -> Triple("VERIFICADO", SuccessGreen, Icons.Default.CheckCircle)
-        VisitorStatus.CHECKED_IN -> Triple("CHECKED-IN", CyanNeon, Icons.Default.CheckCircle)
-        VisitorStatus.DEPARTED -> Triple("DEPARTED", Color(0xFF9CA3AF), Icons.Default.Schedule)
+        VisitorStatus.CHECKED_IN -> Triple("EN CONDOMINIO", CyanNeon, Icons.Default.CheckCircle)
+        VisitorStatus.DEPARTED -> Triple("SALIDA REGISTRADA", Color(0xFF9CA3AF), Icons.Default.Schedule)
         VisitorStatus.PENDING -> Triple("PENDIENTE", WarningOrange, Icons.Default.HourglassTop)
         VisitorStatus.DENIED -> Triple("DENEGADO", ErrorRed, Icons.Default.Cancel)
     }
@@ -430,7 +441,7 @@ fun HistoryLogCard(
             modifier = Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Header Row: Status & Timestamp
+            // Header Row: Folio & Status & Timestamp
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -461,21 +472,12 @@ fun HistoryLogCard(
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = null,
-                        tint = Color.Gray,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = entry.formattedTime,
-                        color = Color.Gray,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                Text(
+                    text = entry.folio,
+                    color = GoldPrimary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
 
             // Visitor Info Row
@@ -516,17 +518,27 @@ fun HistoryLogCard(
                 }
             }
 
-            // QR Pass & Vehicle Plate
+            // QR Pass, Duration & Vehicle Plate
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "${entry.passTypeLabel} • QR: ${entry.passCode}",
-                    color = TextMuted,
-                    fontSize = 11.sp
-                )
+                Column {
+                    Text(
+                        text = "${entry.passTypeLabel} • Pase: ${entry.passCode}",
+                        color = TextMuted,
+                        fontSize = 11.sp
+                    )
+                    entry.durationStay?.let { stay ->
+                        Text(
+                            text = "⏱️ Permanencia: $stay",
+                            color = CyanNeon,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
 
                 if (!entry.vehiclePlate.isNullOrEmpty()) {
                     Surface(
@@ -551,6 +563,23 @@ fun HistoryLogCard(
                     color = Color.LightGray.copy(alpha = 0.8f),
                     fontSize = 11.sp
                 )
+            }
+
+            // Action button to Check-Out if inside
+            if (entry.status == VisitorStatus.CHECKED_IN || entry.status == VisitorStatus.VERIFIED) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Button(
+                    onClick = onCheckOut,
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(34.dp)
+                ) {
+                    Icon(Icons.Default.ExitToApp, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Registrar Salida de Condominio", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
             }
 
             // Action buttons if entry is PENDING
@@ -596,8 +625,8 @@ fun VisitorDetailDialog(
 ) {
     val (statusLabel, statusBg, statusFg, statusIcon) = when (entry.status) {
         VisitorStatus.VERIFIED -> Quadruple("Aprobado", SuccessGreen.copy(alpha = 0.15f), SuccessGreen, Icons.Default.CheckCircle)
-        VisitorStatus.CHECKED_IN -> Quadruple("Checked-In", CyanNeon.copy(alpha = 0.18f), CyanNeon, Icons.Default.CheckCircle)
-        VisitorStatus.DEPARTED -> Quadruple("Departed", Color(0xFF9CA3AF).copy(alpha = 0.18f), Color(0xFFE5E7EB), Icons.Default.Schedule)
+        VisitorStatus.CHECKED_IN -> Quadruple("En Condominio", CyanNeon.copy(alpha = 0.18f), CyanNeon, Icons.Default.CheckCircle)
+        VisitorStatus.DEPARTED -> Quadruple("Salida Registrada", Color(0xFF9CA3AF).copy(alpha = 0.18f), Color(0xFFE5E7EB), Icons.Default.Schedule)
         VisitorStatus.PENDING -> Quadruple("Pendiente", GoldPrimary.copy(alpha = 0.15f), GoldPrimary, Icons.Default.HourglassTop)
         VisitorStatus.DENIED -> Quadruple("Denegado", ErrorRed.copy(alpha = 0.15f), ErrorRed, Icons.Default.Cancel)
     }
@@ -616,7 +645,7 @@ fun VisitorDetailDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Detalle de Registro de Visita",
+                    text = "Detalle de Folio Room",
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
@@ -646,48 +675,30 @@ fun VisitorDetailDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(110.dp)
+                        .height(90.dp)
                         .background(NavyDark, shape = RoundedCornerShape(12.dp))
                         .border(1.dp, GoldPrimary.copy(alpha = 0.3f), shape = RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (!entry.photoPath.isNullOrEmpty()) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.Face,
-                                contentDescription = "Foto de Visitante Capturada",
-                                tint = GoldPrimary,
-                                modifier = Modifier.size(42.dp)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "📸 Captura de Rostro Guardada",
-                                color = GoldPrimary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = entry.photoPath,
-                                color = TextMuted,
-                                fontSize = 9.sp,
-                                maxLines = 1
-                            )
-                        }
-                    } else {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                imageVector = Icons.Default.Badge,
-                                contentDescription = "Sin Foto",
-                                tint = TextMuted,
-                                modifier = Modifier.size(38.dp)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Sin captura fotográfica adjunta",
-                                color = TextMuted,
-                                fontSize = 11.sp
-                            )
-                        }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Badge,
+                            contentDescription = "Folio Room",
+                            tint = GoldPrimary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Folio Único: ${entry.folio}",
+                            color = GoldPrimary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Anfitrión: ${entry.hostResidentName}",
+                            color = TextMuted,
+                            fontSize = 10.sp
+                        )
                     }
                 }
 
@@ -706,7 +717,13 @@ fun VisitorDetailDialog(
                     if (!entry.vehiclePlate.isNullOrEmpty()) {
                         DetailRow(label = "Patente Vehículo", value = entry.vehiclePlate, icon = Icons.Default.DirectionsCar)
                     }
-                    DetailRow(label = "Fecha y Hora Entrada", value = formattedFullDate, icon = Icons.Default.Schedule)
+                    DetailRow(label = "Entrada", value = formattedFullDate, icon = Icons.Default.Schedule)
+                    entry.formattedCheckOutTime?.let { outTime ->
+                        DetailRow(label = "Salida", value = outTime, icon = Icons.Default.ExitToApp)
+                    }
+                    entry.durationStay?.let { stay ->
+                        DetailRow(label = "Permanencia", value = stay, icon = Icons.Default.Timer)
+                    }
                 }
 
                 if (!entry.guardNotes.isNullOrEmpty()) {
@@ -716,7 +733,7 @@ fun VisitorDetailDialog(
                             .background(NavyDark, shape = RoundedCornerShape(10.dp))
                             .padding(10.dp)
                     ) {
-                        Text("Notas del Guardia / Sistema:", color = TextMuted, fontSize = 10.sp)
+                        Text("Notas de Garita / Sistema:", color = TextMuted, fontSize = 10.sp)
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(entry.guardNotes, color = Color.White, fontSize = 11.sp)
                     }
@@ -740,7 +757,7 @@ fun VisitorDetailDialog(
                     OutlinedTextField(
                         value = residentNotesInput,
                         onValueChange = { residentNotesInput = it },
-                        placeholder = { Text("Ej: Entregó paquete de Amazon, familiar autorizado...", color = TextMuted, fontSize = 11.sp) },
+                        placeholder = { Text("Ej: Entregó paquete, familiar autorizado...", color = TextMuted, fontSize = 11.sp) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = GoldPrimary,
@@ -748,27 +765,28 @@ fun VisitorDetailDialog(
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White
                         ),
-                        shape = RoundedCornerShape(8.dp),
-                        maxLines = 3
+                        shape = RoundedCornerShape(8.dp)
                     )
+
                     Spacer(modifier = Modifier.height(8.dp))
+
                     Button(
                         onClick = {
-                            scope.launch {
-                                val entryIdLong = entry.id.toLongOrNull() ?: 0L
-                                if (entryIdLong > 0L) {
-                                    repository.updateResidentNotes(entryIdLong, residentNotesInput)
-                                    Toast.makeText(context, "📝 Nota de residente guardada en Room DB", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    Toast.makeText(context, "Nota actualizada localmente", Toast.LENGTH_SHORT).show()
+                            val idLong = entry.id.toLongOrNull()
+                            if (idLong != null) {
+                                scope.launch {
+                                    repository.updateResidentNotes(idLong, residentNotesInput)
                                 }
+                                Toast.makeText(context, "Nota guardada en base de datos", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
+                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = NavyDark),
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                        modifier = Modifier.align(Alignment.End)
                     ) {
-                        Text("Guardar Nota de Residente", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Guardar Nota", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -776,8 +794,7 @@ fun VisitorDetailDialog(
         confirmButton = {
             Button(
                 onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = NavyDark),
-                shape = RoundedCornerShape(8.dp)
+                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = NavyDark)
             ) {
                 Text("Cerrar", fontWeight = FontWeight.Bold)
             }
@@ -791,7 +808,7 @@ fun VisitorDetailDialog(
 private fun DetailRow(
     label: String,
     value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector
+    icon: ImageVector
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -802,12 +819,14 @@ private fun DetailRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Icon(imageVector = icon, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(14.dp))
+            Icon(imageVector = icon, contentDescription = null, tint = TextMuted, modifier = Modifier.size(13.dp))
             Text(text = label, color = TextMuted, fontSize = 11.sp)
         }
-        Text(text = value, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = value,
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
-
-private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
-

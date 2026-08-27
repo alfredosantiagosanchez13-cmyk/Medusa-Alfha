@@ -52,10 +52,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,7 +69,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.example.data.booking.AppDatabase
+import com.example.data.core.AlphaCoreEngine
 import com.example.data.incident.IncidentCategory
+import com.example.data.incident.IncidentEngine
+import com.example.data.incident.IncidentEntity
 import com.example.data.incident.IncidentPriority
 import com.example.data.incident.VoiceIncident
 import com.example.data.incident.VoiceIncidentCategorizer
@@ -79,6 +85,9 @@ import com.example.ui.theme.NavyDark
 import com.example.ui.theme.NavySurface
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -89,10 +98,36 @@ fun VoiceIncidentLoggerComponent(
     onIncidentLogged: (VoiceIncident) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val db = remember { AppDatabase.getDatabase(context) }
+    val incidentDao = remember { db.incidentDao() }
+
+    val roomIncidents by incidentDao.getAllIncidentsFlow().collectAsState(initial = emptyList())
+
     var isListening by remember { mutableStateOf(false) }
     var currentTranscript by remember { mutableStateOf("") }
     var categorizedIncident by remember { mutableStateOf<VoiceIncident?>(null) }
-    val savedIncidents = remember { mutableStateListOf<VoiceIncident>() }
+
+    // Seed initial incident if empty
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            if (incidentDao.getIncidentCount() == 0) {
+                incidentDao.insertIncident(
+                    IncidentEntity(
+                        folio = "MED-20260821-2001",
+                        rawTranscript = "Vehículo patente AB123CD estacionado en portón principal bloqueando acceso",
+                        category = IncidentCategory.PARKING_VIALIDAD,
+                        priority = IncidentPriority.MEDIA,
+                        location = "Portón Principal",
+                        aiSummary = "Vehículo obstaculizando acceso de emergencia en portón",
+                        recommendedAction = "Contactar al propietario de la patente AB123CD o llamar grúa",
+                        guardName = "Agente #402",
+                        status = "REGISTRADO"
+                    )
+                )
+            }
+        }
+    }
 
     // Speech Recognizer Intent Launcher
     val speechIntentLauncher = rememberLauncherForActivityResult(
@@ -174,7 +209,7 @@ fun VoiceIncidentLoggerComponent(
                             letterSpacing = 1.sp
                         )
                         Text(
-                            text = "Transcripción y Categorización IA",
+                            text = "Transcripción y Persistencia Room SQLite",
                             color = Color.White,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
@@ -425,11 +460,24 @@ fun VoiceIncidentLoggerComponent(
                         ) {
                             Button(
                                 onClick = {
-                                    savedIncidents.add(0, incident)
-                                    onIncidentLogged(incident)
-                                    Toast.makeText(context, "✅ Incidencia registrada por voz en bitácora", Toast.LENGTH_SHORT).show()
-                                    categorizedIncident = null
-                                    currentTranscript = ""
+                                    scope.launch {
+                                        val registered = IncidentEngine.registerIncident(
+                                            context = context,
+                                            db = db,
+                                            rawTranscript = incident.rawTranscript,
+                                            category = incident.category,
+                                            priority = incident.priority,
+                                            location = incident.location,
+                                            aiSummary = incident.aiSummary,
+                                            recommendedAction = incident.recommendedAction,
+                                            reportedBy = incident.guardName,
+                                            reportedByRole = "GUARDIA"
+                                        )
+                                        onIncidentLogged(incident)
+                                        Toast.makeText(context, "✅ Incidencia ${registered.folio} guardada y asignada a ${registered.assignedTo}", Toast.LENGTH_SHORT).show()
+                                        categorizedIncident = null
+                                        currentTranscript = ""
+                                    }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = NavyDark),
                                 shape = RoundedCornerShape(8.dp),
@@ -443,7 +491,7 @@ fun VoiceIncidentLoggerComponent(
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Guardar en Bitácora", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Guardar en Room DB", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
 
                             OutlinedButton(
@@ -462,67 +510,71 @@ fun VoiceIncidentLoggerComponent(
                 }
             }
 
-            // Recent Saved Voice Incident Logs History Feed
-            if (savedIncidents.isNotEmpty()) {
+            // Room SQLite Stored Incidents Section
+            if (roomIncidents.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
-                    text = "📋 Bitácora de Incidencias por Voz del Turno (${savedIncidents.size})",
+                    text = "INCIDENCIAS REGISTRADAS EN ROOM SQLITE (${roomIncidents.size})",
                     color = GoldPrimary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    savedIncidents.take(4).forEach { item ->
-                        val timeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestampMillis))
-                        Surface(
-                            color = NavyCard,
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF374151)),
-                            modifier = Modifier.fillMaxWidth()
+                roomIncidents.take(3).forEach { item ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp),
+                        colors = CardDefaults.cardColors(containerColor = NavyCard),
+                        shape = RoundedCornerShape(8.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            Color(item.priority.badgeColorHex).copy(alpha = 0.4f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.padding(8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(item.category.iconName, fontSize = 14.sp)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Column {
-                                        Text(
-                                            text = "${item.category.displayName} • ${item.location}",
-                                            color = Color.White,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = item.rawTranscript,
-                                            color = TextMuted,
-                                            fontSize = 10.sp,
-                                            maxLines = 1
-                                        )
-                                    }
-                                }
-
-                                Surface(
-                                    color = Color(item.priority.badgeColorHex).copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        text = "$timeStr | ${item.priority.displayName}",
-                                        color = Color(item.priority.badgeColorHex),
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        text = item.category.iconName,
+                                        fontSize = 13.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "${item.category.displayName} • ${item.folio}",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
+                                Text(
+                                    text = "📍 ${item.location} • ${item.formattedDate}",
+                                    color = TextMuted,
+                                    fontSize = 9.sp
+                                )
+                            }
+
+                            Surface(
+                                color = Color(item.priority.badgeColorHex).copy(alpha = 0.2f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = item.priority.displayName,
+                                    color = Color(item.priority.badgeColorHex),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
                             }
                         }
                     }
@@ -535,17 +587,18 @@ fun VoiceIncidentLoggerComponent(
 private fun launchSpeechRecognizer(
     context: android.content.Context,
     launcher: androidx.activity.result.ActivityResultLauncher<Intent>,
-    onListeningStarted: () -> Unit
+    onStarted: () -> Unit
 ) {
     try {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-CL")
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Hable para registrar la incidencia de garita...")
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Reporte su novedad o incidencia de garita por voz...")
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
-        onListeningStarted()
         launcher.launch(intent)
+        onStarted()
     } catch (e: Exception) {
-        Toast.makeText(context, "El servicio de reconocimiento de voz no está disponible en este dispositivo.", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "Reconocimiento por voz no disponible en este dispositivo", Toast.LENGTH_SHORT).show()
     }
 }
