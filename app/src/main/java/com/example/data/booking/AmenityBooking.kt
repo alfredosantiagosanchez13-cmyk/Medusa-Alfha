@@ -8,8 +8,10 @@ import androidx.room.PrimaryKey
     tableName = "amenity_bookings",
     indices = [
         Index(value = ["folio"]),
+        Index(value = ["condominiumId"]),
         Index(value = ["amenityName"]),
         Index(value = ["unitId"]),
+        Index(value = ["bookingDate"]),
         Index(value = ["bookingTimeMillis"]),
         Index(value = ["status"])
     ]
@@ -18,10 +20,11 @@ data class AmenityBooking(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
     val folio: String = "", // e.g. "RSV-20260823-1042"
+    val condominiumId: String = "PRADOS_1", // Tenant isolation
     val amenityName: String, // e.g. "Quincho & BBQ Principal", "Gimnasio Residencial", "Piscina & Solárium"
     val residentName: String, // e.g. "Carlos Mendoza"
     val unitId: String, // e.g. "Casa 208"
-    val bookingDate: String = "", // Formato "dd/MM/yyyy" o "yyyy-MM-dd"
+    val bookingDate: String = "", // Formato "yyyy-MM-dd" o "dd/MM/yyyy"
     val timeSlot: String = "", // Formato "18:00 - 20:00"
     val bookingTimeMillis: Long = System.currentTimeMillis(), // Epoch timestamp for booking start
     val durationMinutes: Int = 120,

@@ -84,44 +84,6 @@ fun AmenityBookingSection(
 
     val bookings by db.amenityBookingDao().getAllBookings().collectAsState(initial = emptyList())
 
-    // Pre-populate seed data in Room DB if empty
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            val count = db.amenityBookingDao().getPendingReminders(0).size
-            if (count == 0) {
-                val now = System.currentTimeMillis()
-                val seedBookings = listOf(
-                    AmenityBooking(
-                        amenityName = "Quincho & BBQ Principal",
-                        residentName = "Carlos Mendoza",
-                        unitId = "Casa 208",
-                        bookingTimeMillis = now + (20 * 60 * 1000), // In 20 minutes
-                        reminderSent = false
-                    ),
-                    AmenityBooking(
-                        amenityName = "Cancha de Pádel",
-                        residentName = "Valeria Rojas",
-                        unitId = "Depto 302",
-                        bookingTimeMillis = now + (45 * 60 * 1000), // In 45 minutes
-                        reminderSent = false
-                    ),
-                    AmenityBooking(
-                        amenityName = "Gimnasio Residencial",
-                        residentName = "Mariana López",
-                        unitId = "Depto 101",
-                        bookingTimeMillis = now + (90 * 60 * 1000), // In 90 minutes
-                        reminderSent = false
-                    )
-                )
-                seedBookings.forEach { booking ->
-                    val id = db.amenityBookingDao().insertBooking(booking)
-                    val saved = booking.copy(id = id)
-                    AmenityReminderManager.schedule15MinReminder(context, saved)
-                }
-            }
-        }
-    }
-
     // New Booking Form State
     var showNewBookingForm by remember { mutableStateOf(false) }
     var selectedAmenity by remember { mutableStateOf("Quincho & BBQ Principal") }

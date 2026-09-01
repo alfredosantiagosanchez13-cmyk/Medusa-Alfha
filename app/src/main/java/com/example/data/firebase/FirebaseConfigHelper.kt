@@ -85,4 +85,6 @@ object FirebaseConfigHelper {
             null
         }
     }
+
+    fun getFirestoreInstance(): FirebaseFirestore? = getFirestore()
 }

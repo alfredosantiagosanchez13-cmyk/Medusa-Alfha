@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HourglassTop
@@ -248,7 +249,8 @@ fun RecentVisitorEntriesList(
                     VisitorEntryCard(
                         entry = entry,
                         onVerify = { onStatusChange?.invoke(entry, VisitorStatus.VERIFIED) },
-                        onDeny = { onStatusChange?.invoke(entry, VisitorStatus.DENIED) }
+                        onDeny = { onStatusChange?.invoke(entry, VisitorStatus.DENIED) },
+                        onCheckOut = { onStatusChange?.invoke(entry, VisitorStatus.DEPARTED) }
                     )
                 }
             }
@@ -284,13 +286,14 @@ private fun StatBadge(
 fun VisitorEntryCard(
     entry: VisitorEntry,
     onVerify: (() -> Unit)? = null,
-    onDeny: (() -> Unit)? = null
+    onDeny: (() -> Unit)? = null,
+    onCheckOut: (() -> Unit)? = null
 ) {
     val (statusLabel, statusColor, statusIcon) = when (entry.status) {
         VisitorStatus.PENDING -> Triple("PENDIENTE", WarningOrange, Icons.Default.HourglassTop)
         VisitorStatus.VERIFIED -> Triple("VERIFICADO", SuccessGreen, Icons.Default.CheckCircle)
-        VisitorStatus.CHECKED_IN -> Triple("CHECKED-IN", CyanNeon, Icons.Default.CheckCircle)
-        VisitorStatus.DEPARTED -> Triple("DEPARTED", Color(0xFF9CA3AF), Icons.Default.Schedule)
+        VisitorStatus.CHECKED_IN -> Triple("EN CONDOMINIO", CyanNeon, Icons.Default.CheckCircle)
+        VisitorStatus.DEPARTED -> Triple("SALIDA REGISTRADA", Color(0xFF9CA3AF), Icons.Default.Schedule)
         VisitorStatus.DENIED -> Triple("DENEGADO", ErrorRed, Icons.Default.Cancel)
     }
 
@@ -306,7 +309,7 @@ fun VisitorEntryCard(
             modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Status Indicator Header
+            // Status Indicator & Folio Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -337,11 +340,19 @@ fun VisitorEntryCard(
                     }
                 }
 
-                Text(
-                    text = entry.formattedTime,
-                    color = Color.Gray,
-                    fontSize = 11.sp
-                )
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = entry.folio,
+                        color = GoldPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = entry.formattedTime,
+                        color = Color.Gray,
+                        fontSize = 10.sp
+                    )
+                }
             }
 
             // Visitor Information
@@ -382,17 +393,27 @@ fun VisitorEntryCard(
                 }
             }
 
-            // Pass Type & Vehicle Info
+            // Pass Type, Permanence & Vehicle Info
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "${entry.passTypeLabel} • QR: ${entry.passCode}",
-                    color = TextMuted,
-                    fontSize = 11.sp
-                )
+                Column {
+                    Text(
+                        text = "${entry.passTypeLabel} • Pase: ${entry.passCode}",
+                        color = TextMuted,
+                        fontSize = 11.sp
+                    )
+                    entry.durationStay?.let { stay ->
+                        Text(
+                            text = "⏱️ Permanencia: $stay",
+                            color = CyanNeon,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
 
                 if (!entry.vehiclePlate.isNullOrEmpty()) {
                     Surface(
@@ -417,6 +438,32 @@ fun VisitorEntryCard(
                     color = Color.LightGray,
                     fontSize = 11.sp
                 )
+            }
+
+            // Tactical 1-Touch Actions for Active Visitors (CHECKED_IN / VERIFIED)
+            if ((entry.status == VisitorStatus.CHECKED_IN || entry.status == VisitorStatus.VERIFIED) && onCheckOut != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Button(
+                    onClick = { onCheckOut.invoke() },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(38.dp)
+                        .testTag("entry_checkout_btn_${entry.id}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ExitToApp,
+                        contentDescription = "Check-Out Salida",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Registrar Salida (Check-Out 1 Toque)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             // Interactive Actions for Pending entries

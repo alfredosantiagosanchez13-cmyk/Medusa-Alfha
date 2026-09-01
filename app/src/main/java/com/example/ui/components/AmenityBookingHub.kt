@@ -102,7 +102,8 @@ import java.util.Date
 import java.util.Locale
 
 enum class AmenityHubTab(val label: String, val icon: ImageVector) {
-    AVAILABILITY("Disponibilidad", Icons.Default.EventAvailable),
+    CALENDAR("Calendario", Icons.Default.CalendarMonth),
+    AVAILABILITY("Catálogo", Icons.Default.EventAvailable),
     ACTIVE("Próximas", Icons.Default.Today),
     HISTORY("Historial", Icons.Default.History)
 }
@@ -112,6 +113,7 @@ fun AmenityBookingHub(
     db: AppDatabase,
     modifier: Modifier = Modifier,
     filterUnitId: String? = null,
+    initialCondominiumId: String = "PRADOS_1",
     canManage: Boolean = true
 ) {
     val context = LocalContext.current
@@ -127,48 +129,12 @@ fun AmenityBookingHub(
         }
     }
 
-    var selectedTab by remember { mutableStateOf(AmenityHubTab.AVAILABILITY) }
+    var selectedTab by remember { mutableStateOf(AmenityHubTab.CALENDAR) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedAmenityForDetail by remember { mutableStateOf<AmenityCatalogItem?>(null) }
     var bookingInOneTapSlot by remember { mutableStateOf<Pair<AmenityCatalogItem, TimeSlotAvailability>?>(null) }
     var bookingToCancel by remember { mutableStateOf<AmenityBooking?>(null) }
     var showQrDialogForBooking by remember { mutableStateOf<AmenityBooking?>(null) }
-
-    // Seed initial demo data if database is empty to ensure immediate live usability
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            val count = db.amenityBookingDao().getBookingsCount()
-            if (count == 0) {
-                val now = System.currentTimeMillis()
-                val catalog = AmenityBookingEngine.CATALOG
-                
-                // Seed 2 active bookings for today
-                AmenityBookingEngine.executeOneTapBooking(
-                    context = context,
-                    db = db,
-                    amenityName = catalog[0].name, // Quincho
-                    residentName = "Carlos Mendoza",
-                    unitId = "Casa 208",
-                    startMillis = now + (3 * 3600 * 1000L),
-                    durationMinutes = 120,
-                    notes = "Almuerzo familiar",
-                    operatorName = "Carlos Mendoza"
-                )
-
-                AmenityBookingEngine.executeOneTapBooking(
-                    context = context,
-                    db = db,
-                    amenityName = catalog[1].name, // Pádel 1
-                    residentName = "Valeria Rojas",
-                    unitId = "Depto 302",
-                    startMillis = now + (5 * 3600 * 1000L),
-                    durationMinutes = 120,
-                    notes = "Partido de dobles",
-                    operatorName = "Valeria Rojas"
-                )
-            }
-        }
-    }
 
     val activeBookings = remember(filteredBookings) {
         val now = System.currentTimeMillis()
@@ -290,6 +256,7 @@ fun AmenityBookingHub(
                 AmenityHubTab.values().forEach { tab ->
                     val isSelected = selectedTab == tab
                     val badgeCount = when (tab) {
+                        AmenityHubTab.CALENDAR -> "Mes"
                         AmenityHubTab.AVAILABILITY -> "${AmenityBookingEngine.CATALOG.size}"
                         AmenityHubTab.ACTIVE -> "${activeBookings.size}"
                         AmenityHubTab.HISTORY -> "${filteredBookings.size}"
@@ -316,7 +283,7 @@ fun AmenityBookingHub(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = "${tab.label} ($badgeCount)",
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
                                 color = if (isSelected) NavyDark else Color.White
                             )
@@ -328,6 +295,17 @@ fun AmenityBookingHub(
 
         // --- 3. DYNAMIC CONTENT BY TAB ---
         when (selectedTab) {
+            AmenityHubTab.CALENDAR -> {
+                AmenityCalendarView(
+                    db = db,
+                    initialCondominiumId = initialCondominiumId,
+                    filterUnitId = filterUnitId,
+                    onShowQrPass = { booking ->
+                        showQrDialogForBooking = booking
+                    }
+                )
+            }
+
             AmenityHubTab.AVAILABILITY -> {
                 AvailabilityAndCatalogView(
                     db = db,

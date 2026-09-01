@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.auth.AlfhaSecurityContext
 import com.example.data.audit.AuditLogEntity
 import com.example.data.core.AlphaCoreEngine
+import com.example.data.firebase.FirebaseConfigHelper
+import com.example.data.firebase.FirestoreTenantManager
 import com.example.data.notifications.SmartNotificationHub
 import com.example.utils.AmenityReminderManager
 import com.example.utils.ResidentNotificationManager
@@ -152,12 +154,13 @@ object AmenityBookingEngine {
     )
 
     /**
-     * Genera los slots estándar del día para una amenidad y calcula su disponibilidad en tiempo real consultando Room DB.
+     * Genera los slots estándar del día para una amenidad y calcula su disponibilidad en tiempo real consultando Room DB y tenant.
      */
     suspend fun getDailyAvailability(
         db: AppDatabase,
         amenityName: String,
-        targetDateCalendar: Calendar = Calendar.getInstance()
+        targetDateCalendar: Calendar = Calendar.getInstance(),
+        condominiumId: String = "PRADOS_1"
     ): List<TimeSlotAvailability> = withContext(Dispatchers.IO) {
         val cal = targetDateCalendar.clone() as Calendar
         cal.set(Calendar.HOUR_OF_DAY, 0)
@@ -166,10 +169,16 @@ object AmenityBookingEngine {
         cal.set(Calendar.MILLISECOND, 0)
         val dayStart = cal.timeInMillis
         val dayEnd = dayStart + (24 * 3600 * 1000L)
+        val validCondo = condominiumId.uppercase().trim()
 
-        // Traer todas las reservas activas para esta amenidad
+        // Traer todas las reservas activas para esta amenidad y condominio
         val existingBookings = db.amenityBookingDao().getAllBookingsList()
-            .filter { it.amenityName == amenityName && it.status != "CANCELADA" && it.bookingTimeMillis in dayStart..dayEnd }
+            .filter { 
+                it.amenityName == amenityName && 
+                it.status != "CANCELADA" && 
+                (it.condominiumId.uppercase() == validCondo || it.condominiumId == "GENERAL") &&
+                it.bookingTimeMillis in dayStart..dayEnd 
+            }
 
         val slotHours = listOf(
             8 to 10,
@@ -227,7 +236,7 @@ object AmenityBookingEngine {
 
     /**
      * Valida conflicto y ejecuta la reserva en 1 toque.
-     * Genera Folio único, registra en Room DB, emite auditoría inmutable, registra Tiempo Devuelto y dispara notificaciones.
+     * Genera Folio único, registra en Room DB, emite auditoría inmutable, registra Tiempo Devuelto y dispara notificaciones y sync a Firestore con aislamiento de condominiumId.
      */
     suspend fun executeOneTapBooking(
         context: Context,
@@ -238,12 +247,15 @@ object AmenityBookingEngine {
         startMillis: Long,
         durationMinutes: Int = 120,
         notes: String = "",
-        operatorName: String = residentName
+        operatorName: String = residentName,
+        condominiumId: String = "PRADOS_1"
     ): BookingExecutionResult = withContext(Dispatchers.IO) {
         val endMillis = startMillis + (durationMinutes * 60 * 1000L)
+        val validCondo = condominiumId.uppercase().trim()
 
         // 1. Bloqueo automático de conflictos
-        val conflicts = db.amenityBookingDao().findConflictingBookings(
+        val conflicts = db.amenityBookingDao().findConflictingBookingsWithTenant(
+            condominiumId = validCondo,
             amenityName = amenityName,
             newStartTime = startMillis,
             newEndTime = endMillis
@@ -266,6 +278,7 @@ object AmenityBookingEngine {
 
         val newBooking = AmenityBooking(
             folio = uniqueFolio,
+            condominiumId = validCondo,
             amenityName = amenityName,
             residentName = residentName,
             unitId = unitId,
@@ -283,7 +296,17 @@ object AmenityBookingEngine {
         val insertedId = db.amenityBookingDao().insertBooking(newBooking)
         val savedBooking = newBooking.copy(id = insertedId)
 
-        // 3. Registrar Auditoría Inmutable
+        // 3. Sincronización aislada con Firebase Firestore
+        try {
+            val firestore = FirebaseConfigHelper.getFirestore()
+            if (firestore != null) {
+                FirestoreTenantManager.saveAmenityBooking(firestore, validCondo, savedBooking)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AmenityBookingEngine", "Error sincronizando reserva en Firestore: ${e.message}")
+        }
+
+        // 4. Registrar Auditoría Inmutable
         val auditFolio = AlphaCoreEngine.generateUniqueFolio("AUD")
         db.auditLogDao().insertAuditLog(
             AuditLogEntity(
@@ -291,13 +314,13 @@ object AmenityBookingEngine {
                 operatorName = operatorName,
                 actionType = "AMENITY_BOOKED",
                 location = unitId,
-                targetEntity = "$amenityName [$uniqueFolio]",
-                changeDetails = "Reserva en 1 toque confirmada para $residentName ($unitId) en horario $timeSlotFormatted ($dateFormatted). Cero fricción / Cero recaptura.",
+                targetEntity = "$amenityName [$uniqueFolio] ($validCondo)",
+                changeDetails = "Reserva en 1 toque confirmada para $residentName ($unitId) en $validCondo, horario $timeSlotFormatted ($dateFormatted). Aislamiento multi-tenant garantizado.",
                 resultStatus = "CONFIRMADA"
             )
         )
 
-        // 4. Programar Recordatorio y Despachar Notificaciones
+        // 5. Programar Recordatorio y Despachar Notificaciones
         AmenityReminderManager.schedule15MinReminder(context, savedBooking)
 
         val scheduleFormatted = "$dateFormatted $timeSlotFormatted"
@@ -323,18 +346,20 @@ object AmenityBookingEngine {
     }
 
     /**
-     * Cancela una reserva, liberando el slot en tiempo real en Room DB y auditando la acción.
+     * Cancela una reserva, liberando el slot en tiempo real en Room DB y auditando la acción, y sincronizando cancelación con Firestore.
      */
     suspend fun cancelBooking(
         context: Context,
         db: AppDatabase,
         bookingId: Long,
         cancelledBy: String,
-        cancellationReason: String = "Cancelado por el residente / administración"
+        cancellationReason: String = "Cancelado por el residente / administración",
+        condominiumId: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val allBookings = db.amenityBookingDao().getAllBookingsList()
         val booking = allBookings.find { it.id == bookingId } ?: return@withContext false
 
+        val targetCondo = (condominiumId ?: booking.condominiumId).uppercase().trim()
         val now = System.currentTimeMillis()
         db.amenityBookingDao().cancelBooking(
             id = bookingId,
@@ -342,6 +367,22 @@ object AmenityBookingEngine {
             reason = cancellationReason,
             nowMillis = now
         )
+
+        // Cancelar en Firestore
+        try {
+            val firestore = FirebaseConfigHelper.getFirestore()
+            if (firestore != null) {
+                FirestoreTenantManager.cancelAmenityBookingInFirestore(
+                    firestore = firestore,
+                    condominiumId = targetCondo,
+                    folio = booking.folio,
+                    cancelledBy = cancelledBy,
+                    reason = cancellationReason
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("AmenityBookingEngine", "Error cancelando en Firestore: ${e.message}")
+        }
 
         // Cancelar recordatorio del sistema
         AmenityReminderManager.cancelReminder(context, bookingId)
@@ -355,7 +396,7 @@ object AmenityBookingEngine {
                 actionType = "AMENITY_CANCELLED",
                 location = booking.unitId,
                 targetEntity = "${booking.amenityName} [${booking.folio}]",
-                changeDetails = "Reserva cancelada por $cancelledBy. Motivo: $cancellationReason. Horario liberado en tiempo real.",
+                changeDetails = "Reserva cancelada por $cancelledBy en $targetCondo. Motivo: $cancellationReason. Horario liberado en tiempo real.",
                 resultStatus = "CANCELADA"
             )
         )

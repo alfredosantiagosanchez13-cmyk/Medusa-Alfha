@@ -1,0 +1,210 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // FUNCIONES AUXILIARES DE SEGURIDAD Y AISLAMIENTO MULTI-TENANT (MEDUSA ALFHA)
+    // =========================================================================
+
+    // Verifica que la solicitud provenga de un usuario autenticado
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Verifica que el usuario pertenezca al condominio solicitado o posea rol operativo autorizado
+    function isAssignedToCondominium(condominiumId) {
+      return isAuthenticated() && (
+        request.auth.token.condominiumId == condominiumId ||
+        request.auth.token.admin == true ||
+        request.auth.token.role in ['SECURITY_GUARD', 'ADMINISTRATOR', 'OPERATOR', 'SUPERVISOR', 'DIRECTOR']
+      );
+    }
+
+    // Verifica que el usuario sea administrador global o del condominio
+    function isCondoAdmin(condominiumId) {
+      return isAuthenticated() && (
+        request.auth.token.admin == true ||
+        (request.auth.token.role in ['ADMINISTRATOR', 'DIRECTOR'] && request.auth.token.condominiumId == condominiumId)
+      );
+    }
+
+    // Validación estricta del campo 'condominiumId' en la creación del documento
+    function isValidCreate(condominiumId) {
+      return request.resource.data.condominiumId == condominiumId;
+    }
+
+    // Validación estricta en actualización: el campo 'condominiumId' debe coincidir y ser inmutable
+    function isValidUpdate(condominiumId) {
+      return request.resource.data.condominiumId == condominiumId &&
+             resource.data.condominiumId == condominiumId &&
+             request.resource.data.condominiumId == resource.data.condominiumId;
+    }
+
+    // =========================================================================
+    // ESTRUCTURA JERÁRQUICA PARTICIONADA: /condominiums/{condominiumId}
+    // =========================================================================
+
+    match /condominiums/{condominiumId} {
+      // Metadatos del Condominio
+      allow read: if isAssignedToCondominium(condominiumId);
+      allow write: if isCondoAdmin(condominiumId);
+
+      // 1. Incidencias y Bitácora Táctica Operativa
+      match /incidents/{folio} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if isCondoAdmin(condominiumId);
+      }
+
+      // 2. Control de Accesos y Registro de Visitantes / Proveedores
+      match /visitor_access/{folio} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if isCondoAdmin(condominiumId);
+      }
+
+      // 3. Pases QR Dinámicos y Autorizaciones de Residentes
+      match /qr_passes/{passCode} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if isCondoAdmin(condominiumId);
+      }
+
+      // 4. Directorio de Unidades y Residentes 360
+      match /residents/{residentId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if isCondoAdmin(condominiumId);
+      }
+
+      match /units/{unitId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if isCondoAdmin(condominiumId);
+      }
+
+      // 5. Casillero y Recepción de Paquetería
+      match /packages/{packageId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if isCondoAdmin(condominiumId);
+      }
+
+      // 6. Registro Vehicular, Tags y LPR
+      match /vehicles/{plate} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if isCondoAdmin(condominiumId);
+      }
+
+      // 7. Rondines y Puntos de Control GPS/NFC
+      match /patrol_logs/{logId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if false; // Inmutabilidad estricta de supervisión
+      }
+
+      // 8. Relevo y Entrega de Turno de Guardia
+      match /shift_handover/{shiftId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if false; // Inalterabilidad de entrega de puesto
+      }
+
+      // 9. Comunicados y Avisos Oficiales
+      match /announcements/{announcementId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isCondoAdmin(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isCondoAdmin(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if isCondoAdmin(condominiumId);
+      }
+
+      // 10. Reservación de Amenidades
+      match /amenity_bookings/{bookingId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if isCondoAdmin(condominiumId);
+      }
+
+      // 11. Tickets de Mantenimiento y Servicios
+      match /maintenance_tickets/{ticketId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if isCondoAdmin(condominiumId);
+      }
+
+      // 12. Alertas de Pánico y Emergencias Operativas
+      match /panic_alerts/{alertId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if false; // Evidencia inmutable
+      }
+
+      // 13. Listas de Verificación y Supervisión de Campo
+      match /field_validations/{validationId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update: if isAssignedToCondominium(condominiumId) && isValidUpdate(condominiumId);
+        allow delete: if false;
+      }
+
+      // 14. Bitácora de Auditoría Criptográfica (Inmutable con firma SHA-256)
+      match /audit_logs/{auditId} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow create: if isAssignedToCondominium(condominiumId) && isValidCreate(condominiumId);
+        allow update, delete: if false; // Trazabilidad inalterable
+      }
+    }
+
+    // =========================================================================
+    // CONSULTAS POR GRUPO DE COLECCIONES (Collection Group Queries)
+    // Garantizan que cualquier consulta global filtre estrictamente por condominiumId
+    // =========================================================================
+    match /{path=**}/incidents/{incident} {
+      allow read: if isAuthenticated() && (
+        resource.data.condominiumId == request.auth.token.condominiumId ||
+        request.auth.token.admin == true
+      );
+    }
+
+    match /{path=**}/visitor_access/{access} {
+      allow read: if isAuthenticated() && (
+        resource.data.condominiumId == request.auth.token.condominiumId ||
+        request.auth.token.admin == true
+      );
+    }
+
+    match /{path=**}/qr_passes/{pass} {
+      allow read: if isAuthenticated() && (
+        resource.data.condominiumId == request.auth.token.condominiumId ||
+        request.auth.token.admin == true
+      );
+    }
+
+    match /{path=**}/packages/{pkg} {
+      allow read: if isAuthenticated() && (
+        resource.data.condominiumId == request.auth.token.condominiumId ||
+        request.auth.token.admin == true
+      );
+    }
+
+    match /{path=**}/audit_logs/{log} {
+      allow read: if isAuthenticated() && (
+        resource.data.condominiumId == request.auth.token.condominiumId ||
+        request.auth.token.admin == true
+      );
+    }
+  }
+}

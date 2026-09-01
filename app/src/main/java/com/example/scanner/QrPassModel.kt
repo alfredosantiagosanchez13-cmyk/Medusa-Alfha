@@ -37,6 +37,8 @@ data class VerificationResult(
     val status: PassStatus,
     val qrPass: QrPassEntity? = null,
     val failureReason: String? = null,
+    val condominiumId: String? = null,
+    val isFirestoreValidated: Boolean = false,
     val verificationTimestamp: Long = System.currentTimeMillis()
 )
 

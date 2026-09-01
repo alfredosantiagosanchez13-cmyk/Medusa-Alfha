@@ -128,6 +128,22 @@ fun PassVerificationSheet(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         )
+                        if (result.condominiumId != null) {
+                            Surface(
+                                color = NavyDark,
+                                shape = RoundedCornerShape(4.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, CyanNeon.copy(alpha = 0.4f)),
+                                modifier = Modifier.padding(top = 4.dp)
+                            ) {
+                                Text(
+                                    text = "🏢 Condominio: ${result.condominiumId} ${if (result.isFirestoreValidated) "· ☁️ Firestore Validado" else "· 💾 Local"}",
+                                    color = CyanNeon,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

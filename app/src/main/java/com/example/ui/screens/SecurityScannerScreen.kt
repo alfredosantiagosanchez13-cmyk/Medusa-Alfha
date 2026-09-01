@@ -4,6 +4,7 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCode
@@ -127,12 +129,15 @@ import com.example.ui.theme.NavyCard
 import com.example.ui.theme.NavyDark
 import com.example.ui.theme.NavySurface
 import com.example.ui.theme.SuccessGreen
+import com.example.ui.components.CasetaSecurityHub
 import com.example.ui.theme.TextMuted
 import com.example.utils.ResidentNotificationManager
 import kotlinx.coroutines.launch
 
 enum class ActiveScreenTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    SCANNER("Escáner", Icons.Default.QrCodeScanner),
+    CASETA("Caseta Táctica", Icons.Default.Security),
+    VECINOS_PORTAL("MEDUSA Vecinos", Icons.Default.Home),
+    SCANNER("Escáner Rápido", Icons.Default.QrCodeScanner),
     VALIDATION("Validación", Icons.Default.FactCheck),
     VEHICLES("Vehículos", Icons.Default.DirectionsCar),
     RESIDENTS("Residentes", Icons.Default.People),
@@ -172,7 +177,7 @@ fun SecurityScannerScreen() {
         roomCheckIns.map { it.toVisitorEntry() }
     }
 
-    var currentTab by remember { mutableStateOf(ActiveScreenTab.SCANNER) }
+    var currentTab by remember { mutableStateOf(ActiveScreenTab.CASETA) }
     var activeVerificationResult by remember { mutableStateOf<VerificationResult?>(null) }
     var showQrGeneratorDialog by remember { mutableStateOf(false) }
     var manualCodeInput by remember { mutableStateOf("") }
@@ -193,59 +198,76 @@ fun SecurityScannerScreen() {
         Scaffold(
             containerColor = NavyDark,
             bottomBar = {
-                NavigationBar(
-                    containerColor = NavySurface,
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("main_bottom_navigation"),
+                    color = NavySurface,
                     tonalElevation = 8.dp,
-                    modifier = Modifier.testTag("main_bottom_navigation")
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
                 ) {
-                    ActiveScreenTab.values().forEach { tab ->
-                        val isSelected = currentTab == tab
-                        NavigationBarItem(
-                            selected = isSelected,
-                            onClick = { currentTab = tab },
-                            icon = {
-                                if (tab == ActiveScreenTab.HISTORY && roomCheckIns.isNotEmpty()) {
-                                    BadgedBox(
-                                        badge = {
-                                            Badge(
-                                                containerColor = GoldPrimary,
-                                                contentColor = NavyDark
-                                            ) {
-                                                Text("${roomCheckIns.size}", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    androidx.compose.foundation.lazy.LazyRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        items(ActiveScreenTab.values()) { tab ->
+                            val isSelected = currentTab == tab
+                            val primaryAccent = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon else GoldPrimary
+
+                            Surface(
+                                onClick = { currentTab = tab },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) primaryAccent.copy(alpha = 0.20f) else Color.Transparent,
+                                border = if (isSelected) BorderStroke(1.dp, primaryAccent) else BorderStroke(1.dp, Color.Transparent),
+                                modifier = Modifier
+                                    .height(48.dp)
+                                    .testTag("nav_tab_${tab.name.lowercase()}")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    if (tab == ActiveScreenTab.HISTORY && roomCheckIns.isNotEmpty()) {
+                                        BadgedBox(
+                                            badge = {
+                                                Badge(
+                                                    containerColor = GoldPrimary,
+                                                    contentColor = NavyDark
+                                                ) {
+                                                    Text("${roomCheckIns.size}", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                                }
                                             }
+                                        ) {
+                                            Icon(
+                                                imageVector = tab.icon,
+                                                contentDescription = tab.label,
+                                                tint = if (isSelected) primaryAccent else Color.LightGray,
+                                                modifier = Modifier.size(20.dp)
+                                            )
                                         }
-                                    ) {
+                                    } else {
                                         Icon(
                                             imageVector = tab.icon,
                                             contentDescription = tab.label,
+                                            tint = if (isSelected) primaryAccent else Color.LightGray,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
-                                } else {
-                                    Icon(
-                                        imageVector = tab.icon,
-                                        contentDescription = tab.label,
-                                        modifier = Modifier.size(20.dp)
+
+                                    Text(
+                                        text = tab.label,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) primaryAccent else Color.LightGray,
+                                        maxLines = 1
                                     )
                                 }
-                            },
-                            label = {
-                                Text(
-                                    text = tab.label,
-                                    fontSize = 10.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1
-                                )
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon else NavyDark,
-                                selectedTextColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon else GoldPrimary,
-                                indicatorColor = if (tab == ActiveScreenTab.AI_COPILOT) CyanNeon.copy(alpha = 0.2f) else GoldPrimary,
-                                unselectedIconColor = Color.Gray,
-                                unselectedTextColor = Color.Gray
-                            ),
-                            modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
-                        )
+                            }
+                        }
                     }
                 }
             }
@@ -347,6 +369,22 @@ fun SecurityScannerScreen() {
                 Spacer(modifier = Modifier.height(8.dp))
 
             when (currentTab) {
+                ActiveScreenTab.CASETA -> {
+                    CasetaSecurityHub(
+                        db = db,
+                        onNavigateToTab = { currentTab = it }
+                    )
+                }
+
+                ActiveScreenTab.VECINOS_PORTAL -> {
+                    com.example.ui.components.MedusaVecinosPortal(
+                        onSimulateScanInCaseta = { code ->
+                            currentTab = ActiveScreenTab.SCANNER
+                            verifyPassCode(code)
+                        }
+                    )
+                }
+
                 ActiveScreenTab.SCANNER -> {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
@@ -508,7 +546,35 @@ fun SecurityScannerScreen() {
                                     if (idLong != null) {
                                         scope.launch {
                                             if (newStatus == VisitorStatus.DEPARTED) {
-                                                repository.registerCheckOut(idLong, notes = "Salida confirmada en garita")
+                                                repository.registerCheckOut(idLong, notes = "Salida confirmada en garita con 1 toque")
+                                                val duration = entry.durationStay ?: "Normal"
+                                                ResidentNotificationManager.notifyVisitorDeparted(
+                                                    context = context,
+                                                    guestName = entry.visitorName,
+                                                    destinationHouse = entry.destinationHouse,
+                                                    hostResidentName = entry.hostResidentName,
+                                                    durationStay = duration
+                                                )
+                                                SmartNotificationHub.notifyVisitorExit(
+                                                    context = context,
+                                                    db = db,
+                                                    guestName = entry.visitorName,
+                                                    unitId = entry.destinationHouse,
+                                                    hostResidentName = entry.hostResidentName,
+                                                    durationStay = duration,
+                                                    checkInFolio = entry.folio
+                                                )
+                                                db.auditLogDao().insertAuditLog(
+                                                    AuditLogEntity(
+                                                        folio = AlphaCoreEngine.generateUniqueFolio("AUD"),
+                                                        operatorName = "Guardia Garita 1",
+                                                        actionType = "CHECK_OUT_ONE_TOUCH",
+                                                        location = "Garita Principal",
+                                                        targetEntity = "${entry.visitorName} (${entry.folio})",
+                                                        changeDetails = "Salida táctica de 1 toque. Permanencia: $duration",
+                                                        resultStatus = "EXITOSO"
+                                                    )
+                                                )
                                             } else {
                                                 repository.updateCheckInStatus(
                                                     id = idLong,
@@ -539,7 +605,7 @@ fun SecurityScannerScreen() {
                                                 )
                                             }
                                         }
-                                        val statusMsg = if (newStatus == VisitorStatus.VERIFIED) "Verificado y Notificado al Residente" else if (newStatus == VisitorStatus.DEPARTED) "Salida Registrada" else "Denegado"
+                                        val statusMsg = if (newStatus == VisitorStatus.VERIFIED) "Verificado y Notificado al Residente" else if (newStatus == VisitorStatus.DEPARTED) "Salida Registrada y Notificada al Residente" else "Denegado"
                                         Toast.makeText(context, "Room DB: $statusMsg (${entry.visitorName})", Toast.LENGTH_SHORT).show()
                                     }
                                 }

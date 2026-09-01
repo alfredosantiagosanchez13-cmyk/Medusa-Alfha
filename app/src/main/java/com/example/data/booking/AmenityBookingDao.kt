@@ -12,6 +12,15 @@ interface AmenityBookingDao {
     @Query("SELECT * FROM amenity_bookings ORDER BY bookingTimeMillis DESC")
     fun getAllBookings(): Flow<List<AmenityBooking>>
 
+    @Query("SELECT * FROM amenity_bookings WHERE condominiumId = :condominiumId OR condominiumId = 'GENERAL' ORDER BY bookingTimeMillis DESC")
+    fun getBookingsByCondominium(condominiumId: String): Flow<List<AmenityBooking>>
+
+    @Query("SELECT * FROM amenity_bookings WHERE (condominiumId = :condominiumId OR condominiumId = 'GENERAL') AND bookingDate = :bookingDate AND status != 'CANCELADA' ORDER BY bookingTimeMillis ASC")
+    fun getBookingsByDate(condominiumId: String, bookingDate: String): Flow<List<AmenityBooking>>
+
+    @Query("SELECT * FROM amenity_bookings WHERE (condominiumId = :condominiumId OR condominiumId = 'GENERAL') AND bookingDate LIKE :yearMonthPrefix || '%' AND status != 'CANCELADA' ORDER BY bookingTimeMillis ASC")
+    fun getBookingsByMonth(condominiumId: String, yearMonthPrefix: String): Flow<List<AmenityBooking>>
+
     @Query("SELECT * FROM amenity_bookings WHERE bookingTimeMillis > :currentTime AND status != 'CANCELADA' ORDER BY bookingTimeMillis ASC")
     fun getUpcomingBookings(currentTime: Long): Flow<List<AmenityBooking>>
 
@@ -23,6 +32,14 @@ interface AmenityBookingDao {
 
     @Query("SELECT * FROM amenity_bookings WHERE reminderSent = 0 AND bookingTimeMillis > :currentTime AND status != 'CANCELADA'")
     suspend fun getPendingReminders(currentTime: Long): List<AmenityBooking>
+
+    @Query("SELECT * FROM amenity_bookings WHERE (condominiumId = :condominiumId OR condominiumId = 'GENERAL') AND amenityName = :amenityName AND status != 'CANCELADA' AND ((bookingTimeMillis < :newEndTime AND (bookingTimeMillis + (durationMinutes * 60000)) > :newStartTime))")
+    suspend fun findConflictingBookingsWithTenant(
+        condominiumId: String,
+        amenityName: String,
+        newStartTime: Long,
+        newEndTime: Long
+    ): List<AmenityBooking>
 
     @Query("SELECT * FROM amenity_bookings WHERE amenityName = :amenityName AND status != 'CANCELADA' AND ((bookingTimeMillis < :newEndTime AND (bookingTimeMillis + (durationMinutes * 60000)) > :newStartTime))")
     suspend fun findConflictingBookings(
