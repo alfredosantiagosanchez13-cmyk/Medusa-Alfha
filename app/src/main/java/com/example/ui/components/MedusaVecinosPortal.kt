@@ -12,6 +12,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.vecinos.*
 import com.example.data.booking.AppDatabase
+import com.example.scanner.PassType
 import com.example.ui.theme.*
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
@@ -68,17 +71,23 @@ fun MedusaVecinosPortal(
     // Diálogo de Ver Croquis desde sesión activa
     var showCroquisDialog by remember { mutableStateOf(false) }
 
-    // Formulario de Crear Visita
+    // Formulario de Crear Visita Temporal
     var visNombre by remember { mutableStateOf("") }
     var visFecha by remember {
         mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()))
     }
+    var visDuracionHoras by remember { mutableStateOf(24) }
+    var visTipoPase by remember { mutableStateOf(PassType.VISITOR_SINGLE) }
+    var visPlacas by remember { mutableStateOf("") }
+    var visDocumento by remember { mutableStateOf("") }
+    var visMaxEntries by remember { mutableStateOf(1) }
     var visNotas by remember { mutableStateOf("") }
     var isCreatingVisita by remember { mutableStateOf(false) }
 
     // QR Generado
     var ultimoQrCode by remember { mutableStateOf<String?>(null) }
     var ultimoQrBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var ultimoQrVigenciaMillis by remember { mutableStateOf(0L) }
     var ultimaVisitaInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     // Lista de Visitas
@@ -160,7 +169,7 @@ fun MedusaVecinosPortal(
     fun ejecutarCrearVisita() {
         val s = sesion ?: return
         if (visNombre.isBlank() || visFecha.isBlank()) {
-            Toast.makeText(context, "Ingresa el nombre del visitante y la fecha.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Ingresa el nombre del visitante.", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -173,46 +182,63 @@ fun MedusaVecinosPortal(
                 calle = s.calle,
                 nombreVisitante = visNombre.trim(),
                 fechaVisita = visFecha.trim(),
-                notas = visNotas.trim()
+                notas = visNotas.trim(),
+                duracionHoras = visDuracionHoras,
+                tipoPase = visTipoPase,
+                placasVehiculo = visPlacas.trim().ifBlank { null },
+                documentoVisitante = visDocumento.trim().ifBlank { "Verificar en Caseta" },
+                maxEntries = visMaxEntries,
+                anfitrion = "Casa ${s.casa} · ${s.calle} (${s.nombreCondominio})"
             )
             isCreatingVisita = false
             res.onSuccess { (idVisita, payload) ->
                 val bmp = generateQrBitmapNative(payload)
                 ultimoQrCode = payload
                 ultimoQrBitmap = bmp
+                ultimoQrVigenciaMillis = System.currentTimeMillis() + (visDuracionHoras * 3600 * 1000L)
                 ultimaVisitaInfo = Pair(visNombre.trim(), visFecha.trim())
 
                 // Limpiar campos
                 visNombre = ""
+                visPlacas = ""
                 visNotas = ""
                 cargarVisitasActuales(s)
-                Toast.makeText(context, "✅ Pase guardado en base de datos local (Room SQLite)", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "✅ Pase temporal guardado en Room SQLite y sincronizado a Firestore", Toast.LENGTH_LONG).show()
             }.onFailure {
                 Toast.makeText(context, "Error guardando pase: ${it.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    fun compartirPorWhatsApp() {
+    fun compartirPorWhatsApp(visita: VecinoVisita? = null) {
         val s = sesion ?: return
-        val v = ultimaVisitaInfo ?: Pair("Visitante", visFecha)
-        val qrCode = ultimoQrCode ?: return
-        val msg = "Hola ${v.first}, te comparto tu código de acceso para Casa ${s.casa}${if (s.calle.isNotBlank()) " (${s.calle})" else ""} en ${s.nombreCondominio}.\n\nCódigo de Acceso: $qrCode\nFecha autorizada: ${v.second}\nPreséntalo en la caseta de seguridad MEDUSA."
+        val targetCode = visita?.passCode ?: ultimoQrCode ?: return
+        val targetName = visita?.nombreVisitante ?: ultimaVisitaInfo?.first ?: "Visitante"
+        val targetPlacas = visita?.vehiclePlate ?: visPlacas.ifBlank { null }
+        val targetVigencia = if (visita != null && visita.validUntilMillis > 0) visita.validUntilMillis else (if (ultimoQrVigenciaMillis > 0) ultimoQrVigenciaMillis else System.currentTimeMillis() + 86400000L)
+        val targetEntries = visita?.maxEntries ?: visMaxEntries
+        val targetNotas = visita?.notas ?: visNotas
 
-        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, msg)
-            setPackage("com.whatsapp")
-        }
+        val textoInvitacion = MedusaVecinosService.generarTextoInvitacion(
+            condoNombre = s.nombreCondominio,
+            casa = s.casa,
+            calle = s.calle,
+            nombreVisitante = targetName,
+            passCode = targetCode,
+            validUntilMillis = targetVigencia,
+            placas = targetPlacas,
+            maxEntries = targetEntries,
+            notas = targetNotas
+        )
+
+        val bmp = if (visita != null) generateQrBitmapNative(targetCode) else ultimoQrBitmap
+        val imageUri = if (bmp != null) MedusaVecinosService.guardarQrEnCache(context, bmp, targetCode) else null
 
         try {
-            context.startActivity(sendIntent)
+            val shareIntent = MedusaVecinosService.crearIntentCompartirPase(context, textoInvitacion, imageUri)
+            context.startActivity(shareIntent)
         } catch (e: Exception) {
-            val generalIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, msg)
-            }
-            context.startActivity(Intent.createChooser(generalIntent, "Compartir Pase de Visita"))
+            Toast.makeText(context, "Error abriendo selector de compartir: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -666,7 +692,7 @@ fun MedusaVecinosPortal(
                     )
                 }
             } else {
-                // Formulario de Autorizar Visita
+                // Formulario de Autorizar Visita Temporal
                 item {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = NavyCard),
@@ -676,20 +702,41 @@ fun MedusaVecinosPortal(
                     ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text(
-                            "🚗 Autorizar una Visita (Cero Recaptura)",
-                            color = GoldPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Icon(Icons.Default.QrCode2, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(22.dp))
+                                Text(
+                                    "Generar Pase Temporal de Visitante",
+                                    color = GoldPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Surface(
+                                color = CyanNeon.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    "☁️ Firestore Sync",
+                                    color = CyanNeon,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
 
-                        Text("Nombre del visitante", color = TextMuted, fontSize = 12.sp)
+                        Text("1. Nombre del Visitante *", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         OutlinedTextField(
                             value = visNombre,
                             onValueChange = { visNombre = it },
-                            placeholder = { Text("Nombre completo", color = Color.Gray, fontSize = 13.sp) },
+                            placeholder = { Text("Ej: Lic. Carlos Mendoza", color = Color.Gray, fontSize = 13.sp) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -701,25 +748,109 @@ fun MedusaVecinosPortal(
                                 .testTag("vecino_vis_nombre")
                         )
 
-                        Text("Fecha de la visita", color = TextMuted, fontSize = 12.sp)
-                        OutlinedTextField(
-                            value = visFecha,
-                            onValueChange = { visFecha = it },
-                            placeholder = { Text("YYYY-MM-DD", color = Color.Gray, fontSize = 13.sp) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = CyanNeon
-                            ),
+                        Text("2. Tipo de Pase:", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        val tiposPase = remember {
+                            listOf(
+                                Pair(PassType.VISITOR_SINGLE, "Visita Personal"),
+                                Pair(PassType.DELIVERY_SERVICE, "Delivery / Paquete"),
+                                Pair(PassType.RESIDENT_PERMANENT, "Frecuente / Familiar"),
+                                Pair(PassType.EVENT_GUEST, "Evento")
+                            )
+                        }
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.fillMaxWidth()
-                        )
+                        ) {
+                            items(tiposPase) { item ->
+                                val tipo = item.first
+                                val label = item.second
+                                val isSel = visTipoPase == tipo
+                                FilterChip(
+                                    selected = isSel,
+                                    onClick = { visTipoPase = tipo },
+                                    label = { Text(label, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = GoldPrimary,
+                                        selectedLabelColor = NavyDark,
+                                        containerColor = NavyDark,
+                                        labelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
 
-                        Text("Notas (opcional)", color = TextMuted, fontSize = 12.sp)
+                        Text("3. Vigencia Temporal del Pase:", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        val duracionesPase = remember {
+                            listOf(
+                                Pair(2, "2 Horas"),
+                                Pair(6, "6 Horas"),
+                                Pair(12, "12 Horas"),
+                                Pair(24, "24 Horas (1 Día)"),
+                                Pair(48, "48 Horas (2 Días)"),
+                                Pair(72, "72 Horas (3 Días)")
+                            )
+                        }
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(duracionesPase) { item ->
+                                val horas = item.first
+                                val label = item.second
+                                val isSel = visDuracionHoras == horas
+                                FilterChip(
+                                    selected = isSel,
+                                    onClick = { visDuracionHoras = horas },
+                                    label = { Text(label, fontSize = 11.sp) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = CyanNeon,
+                                        selectedLabelColor = NavyDark,
+                                        containerColor = NavyDark,
+                                        labelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Placas (opcional)", color = TextMuted, fontSize = 11.sp)
+                                OutlinedTextField(
+                                    value = visPlacas,
+                                    onValueChange = { visPlacas = it },
+                                    placeholder = { Text("Ej: ABC-1234", color = Color.Gray, fontSize = 12.sp) },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = CyanNeon
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Identificación / INE", color = TextMuted, fontSize = 11.sp)
+                                OutlinedTextField(
+                                    value = visDocumento,
+                                    onValueChange = { visDocumento = it },
+                                    placeholder = { Text("Doc / RUT", color = Color.Gray, fontSize = 12.sp) },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = CyanNeon
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+
+                        Text("Notas o Instrucciones para Caseta (opcional)", color = TextMuted, fontSize = 11.sp)
                         OutlinedTextField(
                             value = visNotas,
                             onValueChange = { visNotas = it },
-                            placeholder = { Text("Ej: viene en camioneta blanca, acceso peatonal...", color = Color.Gray, fontSize = 13.sp) },
+                            placeholder = { Text("Ej: Viene a reparar calentador solar...", color = Color.Gray, fontSize = 12.sp) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -742,7 +873,9 @@ fun MedusaVecinosPortal(
                             if (isCreatingVisita) {
                                 CircularProgressIndicator(modifier = Modifier.size(20.dp), color = NavyDark)
                             } else {
-                                Text("Generar y Guardar QR en Base Local", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Generar Pase QR y Guardar en Firestore", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
                         }
                     }
@@ -763,17 +896,35 @@ fun MedusaVecinosPortal(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Text(
-                                "✅ QR GUARDADO Y LISTO PARA COMPARTIR",
-                                color = SuccessGreen,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "✅ PASE TEMPORAL GENERADO",
+                                    color = SuccessGreen,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                Surface(
+                                    color = SuccessGreen.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        "Room + Firestore OK",
+                                        color = SuccessGreen,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
 
                             Surface(
                                 color = Color.White,
                                 shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.padding(8.dp)
+                                modifier = Modifier.padding(6.dp)
                             ) {
                                 Image(
                                     bitmap = ultimoQrBitmap!!.asImageBitmap(),
@@ -787,12 +938,12 @@ fun MedusaVecinosPortal(
                             Text(
                                 ultimoQrCode ?: "",
                                 color = CyanNeon,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold
                             )
 
                             Text(
-                                "El pase ya está en la base de datos de caseta y se validará al instante.",
+                                "El pase ya está disponible para validación inmediata en caseta de seguridad.",
                                 color = TextMuted,
                                 fontSize = 12.sp,
                                 textAlign = TextAlign.Center
@@ -804,11 +955,11 @@ fun MedusaVecinosPortal(
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(44.dp)
+                                    .height(46.dp)
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null, tint = Color.Black)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("📲 Enviar por WhatsApp", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("📲 Compartir Pase (Intent / WhatsApp)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             }
 
                             OutlinedButton(
@@ -818,6 +969,8 @@ fun MedusaVecinosPortal(
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
+                                Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text("🔍 Probar Validación en Caseta", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
                         }
@@ -843,7 +996,7 @@ fun MedusaVecinosPortal(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                "📋 Mis Visitas Autorizadas (Base Local)",
+                                "📋 Mis Visitas Autorizadas (Base Local + Cloud)",
                                 color = GoldPrimary,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold
@@ -874,12 +1027,29 @@ fun MedusaVecinosPortal(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            visita.nombreVisitante,
-                                            color = Color.White,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Text(
+                                                visita.nombreVisitante,
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            if (!visita.vehiclePlate.isNullOrBlank()) {
+                                                Surface(
+                                                    color = NavyDark,
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.4f))
+                                                ) {
+                                                    Text(
+                                                        "🚗 ${visita.vehiclePlate}",
+                                                        color = GoldPrimary,
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
                                         Text(
                                             "Fecha: ${visita.fechaVisita}${if (visita.notas.isNotBlank()) " · ${visita.notas}" else ""}",
                                             color = TextMuted,
@@ -892,17 +1062,26 @@ fun MedusaVecinosPortal(
                                         )
                                     }
 
-                                    Surface(
-                                        color = if (visita.estado.contains("Usado", ignoreCase = true)) SuccessGreen.copy(alpha = 0.2f) else GoldPrimary.copy(alpha = 0.2f),
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        Text(
-                                            text = visita.estado,
-                                            color = if (visita.estado.contains("Usado", ignoreCase = true)) SuccessGreen else GoldPrimary,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                        )
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Surface(
+                                            color = if (visita.estado.contains("Usado", ignoreCase = true)) SuccessGreen.copy(alpha = 0.2f) else if (visita.estado.contains("Expirado", ignoreCase = true)) ErrorRed.copy(alpha = 0.2f) else GoldPrimary.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Text(
+                                                text = visita.estado,
+                                                color = if (visita.estado.contains("Usado", ignoreCase = true)) SuccessGreen else if (visita.estado.contains("Expirado", ignoreCase = true)) ErrorRed else GoldPrimary,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
+
+                                        IconButton(
+                                            onClick = { compartirPorWhatsApp(visita) },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Share, contentDescription = "Compartir", tint = SuccessGreen, modifier = Modifier.size(18.dp))
+                                        }
                                     }
                                 }
                                 HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
