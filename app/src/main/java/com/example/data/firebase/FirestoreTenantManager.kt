@@ -3,13 +3,18 @@ package com.example.data.firebase
 import android.util.Log
 import com.example.data.audit.AuditLogEntity
 import com.example.data.booking.AmenityBooking
+import com.example.data.booking.FirestoreAmenityBooking
 import com.example.data.incident.IncidentEntity
 import com.example.data.packages.PackageEntity
 import com.example.data.passes.QrPassRoomEntity
+import com.example.data.profile.FirestoreUserProfile
+import com.example.data.visitor.FirestoreVisitorLog
 import com.example.data.visitor.VisitorCheckIn
 import com.example.scanner.PassType
+import com.google.firebase.Timestamp
 import com.google.firebase.firestore.*
 import kotlinx.coroutines.tasks.await
+import java.util.Date
 
 /**
  * Excepción lanzada cuando se intenta realizar una operación sin especificar o validando incorrectamente
@@ -23,6 +28,7 @@ class TenantIsolationException(message: String) : SecurityException(message)
  * Estructura Jerárquica Estricta:
  *  /condominiums/{condominiumId} (Metadatos del condominio)
  *    ├── incidents/{folio}
+ *    ├── visitor_logs/{folio} (Esquema oficial: timestamp, visitorName, authorizedUnitNumber)
  *    ├── visitor_access/{folio}
  *    ├── qr_passes/{passCode}
  *    ├── residents/{residentId}
@@ -47,6 +53,7 @@ object FirestoreTenantManager {
     // Nombres oficiales de colecciones particionadas
     const val ROOT_CONDOMINIUMS = "condominiums"
     const val SUB_INCIDENTS = "incidents"
+    const val SUB_VISITOR_LOGS = "visitor_logs"
     const val SUB_VISITOR_ACCESS = "visitor_access"
     const val SUB_QR_PASSES = "qr_passes"
     const val SUB_RESIDENTS = "residents"
@@ -57,6 +64,8 @@ object FirestoreTenantManager {
     const val SUB_ANNOUNCEMENTS = "announcements"
     const val SUB_AMENITY_BOOKINGS = "amenity_bookings"
     const val SUB_AUDIT_LOGS = "audit_logs"
+    const val SUB_USERS = "users"
+    const val SUB_USER_PROFILES = "user_profiles"
 
     /**
      * Valida que el condominiumId no sea nulo ni vacío.
@@ -182,7 +191,8 @@ object FirestoreTenantManager {
     }
 
     /**
-     * Guarda o actualiza un Registro de Visitante con aislamiento estricto por condominio.
+     * Guarda o actualiza un Registro de Visitante (Visitor Log) con aislamiento estricto por condominio
+     * cumpliendo el esquema oficial de Firestore: timestamp, visitorName, authorizedUnitNumber.
      */
     suspend fun saveVisitorCheckIn(
         firestore: FirebaseFirestore,
@@ -191,21 +201,31 @@ object FirestoreTenantManager {
     ): Result<Unit> {
         return try {
             val validId = validateCondominiumId(condominiumId)
-            val subcollection = getTenantSubcollection(firestore, validId, SUB_VISITOR_ACCESS)
+            val subcollectionLogs = getTenantSubcollection(firestore, validId, SUB_VISITOR_LOGS)
+            val subcollectionAccess = getTenantSubcollection(firestore, validId, SUB_VISITOR_ACCESS)
 
+            val firestoreTimestamp = Timestamp(Date(visitor.timestampMillis))
+            val firestoreCheckOutTimestamp = visitor.checkOutMillis?.let { Timestamp(Date(it)) }
+
+            // Esquema oficial estandarizado en Firestore
             val payload = hashMapOf(
                 "condominiumId" to validId,
                 "id" to visitor.id,
                 "folio" to visitor.folio,
+                "timestamp" to firestoreTimestamp,
+                "timestampMillis" to visitor.timestampMillis,
                 "visitorName" to visitor.visitorName,
-                "visitorDocument" to visitor.visitorDocument,
+                "authorizedUnitNumber" to visitor.destinationHouse,
                 "destinationHouse" to visitor.destinationHouse,
+                "unitNumber" to visitor.destinationHouse,
+                "visitorDocument" to visitor.visitorDocument,
                 "passCode" to visitor.passCode,
                 "passTypeLabel" to visitor.passTypeLabel,
                 "vehiclePlate" to (visitor.vehiclePlate ?: ""),
                 "status" to visitor.status,
-                "timestampMillis" to visitor.timestampMillis,
+                "checkOutTimestamp" to firestoreCheckOutTimestamp,
                 "checkOutMillis" to (visitor.checkOutMillis ?: 0L),
+                "guardName" to visitor.guardName,
                 "guardNotes" to (visitor.guardNotes ?: ""),
                 "residentNotes" to (visitor.residentNotes ?: ""),
                 "hostResidentName" to visitor.hostResidentName,
@@ -213,14 +233,53 @@ object FirestoreTenantManager {
                 "syncedAtMillis" to System.currentTimeMillis()
             )
 
-            subcollection.document(visitor.folio)
+            // Guardar en la colección canónica 'visitor_logs'
+            subcollectionLogs.document(visitor.folio)
                 .set(payload, SetOptions.merge())
                 .await()
 
-            Log.i(TAG, "[$validId] Check-In ${visitor.folio} guardado exitosamente con aislamiento.")
+            // Mantener sincronizada la subcolección 'visitor_access' para retrocompatibilidad
+            subcollectionAccess.document(visitor.folio)
+                .set(payload, SetOptions.merge())
+                .await()
+
+            Log.i(TAG, "[$validId] Visitor Log ${visitor.folio} [${visitor.visitorName} -> ${visitor.destinationHouse}] guardado exitosamente.")
             Result.success(Unit)
         } catch (e: Exception) {
-            Log.e(TAG, "Error guardando visitante con aislamiento: ${e.message}")
+            Log.e(TAG, "Error guardando visitante en Firestore con aislamiento: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Guarda directamente un modelo FirestoreVisitorLog en Firestore asegurando el esquema requerido.
+     */
+    suspend fun saveVisitorLog(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        visitorLog: FirestoreVisitorLog
+    ): Result<Unit> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            val subcollectionLogs = getTenantSubcollection(firestore, validId, SUB_VISITOR_LOGS)
+            val subcollectionAccess = getTenantSubcollection(firestore, validId, SUB_VISITOR_ACCESS)
+
+            val payload = visitorLog.toMap().toMutableMap().apply {
+                put("condominiumId", validId)
+            }
+
+            subcollectionLogs.document(visitorLog.folio)
+                .set(payload, SetOptions.merge())
+                .await()
+
+            subcollectionAccess.document(visitorLog.folio)
+                .set(payload, SetOptions.merge())
+                .await()
+
+            Log.i(TAG, "[$validId] FirestoreVisitorLog ${visitorLog.folio} guardado exitosamente.")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error guardando FirestoreVisitorLog: ${e.message}")
             Result.failure(e)
         }
     }
@@ -231,7 +290,8 @@ object FirestoreTenantManager {
     suspend fun saveQrPass(
         firestore: FirebaseFirestore,
         condominiumId: String,
-        pass: QrPassRoomEntity
+        pass: QrPassRoomEntity,
+        userId: String? = null
     ): Result<Unit> {
         return try {
             val validId = validateCondominiumId(condominiumId)
@@ -239,10 +299,15 @@ object FirestoreTenantManager {
 
             val payload = hashMapOf(
                 "condominiumId" to validId,
+                "userId" to (userId ?: ""),
+                "residentId" to (userId ?: ""),
                 "passCode" to pass.passCode,
+                "entryCode" to pass.passCode,
+                "uniqueEntryCode" to pass.passCode,
                 "guestName" to pass.guestName,
                 "guestDocument" to pass.guestDocument,
                 "destinationHouse" to pass.destinationHouse,
+                "authorizedUnitNumber" to pass.destinationHouse,
                 "hostResidentName" to pass.hostResidentName,
                 "vehiclePlate" to (pass.vehiclePlate ?: ""),
                 "passType" to pass.passType.name,
@@ -252,7 +317,12 @@ object FirestoreTenantManager {
                 "currentEntriesCount" to pass.currentEntriesCount,
                 "isActive" to pass.isActive,
                 "note" to (pass.note ?: ""),
-                "syncedAtMillis" to System.currentTimeMillis()
+                "syncedAtMillis" to System.currentTimeMillis(),
+                "linkedResidentAccount" to hashMapOf(
+                    "userId" to (userId ?: ""),
+                    "residentName" to pass.hostResidentName,
+                    "unitOrDepartment" to pass.destinationHouse
+                )
             )
 
             subcollection.document(pass.passCode)
@@ -366,6 +436,51 @@ object FirestoreTenantManager {
     }
 
     /**
+     * Consulta registros de visitantes de la colección oficial 'visitor_logs' con aislamiento de inquilino.
+     * Soporta filtro opcional por unidad autorizada (authorizedUnitNumber).
+     */
+    suspend fun queryVisitorLogs(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        limitCount: Long = 50,
+        authorizedUnitNumber: String? = null
+    ): Result<List<FirestoreVisitorLog>> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            var query = buildIsolatedQuery(firestore, validId, SUB_VISITOR_LOGS)
+            if (!authorizedUnitNumber.isNullOrBlank()) {
+                query = query.whereEqualTo("authorizedUnitNumber", authorizedUnitNumber.trim())
+            }
+            val snapshot = query.limit(limitCount).get().await()
+            val logs = snapshot.documents.mapNotNull { doc ->
+                mapDocToVisitorLog(doc, validId)
+            }
+            Result.success(logs)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error consultando visitor_logs: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Mapea un DocumentSnapshot de Firestore a la entidad tipada FirestoreVisitorLog.
+     */
+    fun mapDocToVisitorLog(doc: DocumentSnapshot, expectedCondoId: String): FirestoreVisitorLog? {
+        val condoId = doc.getString("condominiumId") ?: expectedCondoId
+        if (!condoId.equals(expectedCondoId, ignoreCase = true) && condoId != "GENERAL") return null
+        return FirestoreVisitorLog.fromDocumentSnapshot(doc, expectedCondoId)
+    }
+
+    /**
+     * Mapea un DocumentSnapshot de Firestore a VisitorCheckIn garantizando retrocompatibilidad
+     * y aislamiento por condominio.
+     */
+    fun mapDocToVisitorCheckIn(doc: DocumentSnapshot, expectedCondoId: String): VisitorCheckIn? {
+        val log = mapDocToVisitorLog(doc, expectedCondoId) ?: return null
+        return log.toVisitorCheckIn()
+    }
+
+    /**
      * Consulta accesos de visitantes filtrados forzosamente por 'whereEqualTo("condominiumId", validId)'.
      */
     suspend fun queryVisitorAccess(
@@ -374,10 +489,20 @@ object FirestoreTenantManager {
         limitCount: Long = 50
     ): Result<List<DocumentSnapshot>> {
         return try {
-            val query = buildIsolatedQuery(firestore, condominiumId, SUB_VISITOR_ACCESS)
+            val validId = validateCondominiumId(condominiumId)
+            // Intentar primero desde SUB_VISITOR_LOGS
+            val query = buildIsolatedQuery(firestore, validId, SUB_VISITOR_LOGS)
                 .limit(limitCount)
             val snapshot = query.get().await()
-            Result.success(snapshot.documents)
+            if (!snapshot.isEmpty) {
+                Result.success(snapshot.documents)
+            } else {
+                // Fallback a SUB_VISITOR_ACCESS
+                val fallback = buildIsolatedQuery(firestore, validId, SUB_VISITOR_ACCESS)
+                    .limit(limitCount)
+                val fallbackSnapshot = fallback.get().await()
+                Result.success(fallbackSnapshot.documents)
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -396,6 +521,146 @@ object FirestoreTenantManager {
             Result.success(snapshot.documents)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Mapea un DocumentSnapshot de Firestore a QrPassRoomEntity validando pertenencia al condominio.
+     */
+    fun mapDocToQrPass(doc: DocumentSnapshot, expectedCondoId: String): QrPassRoomEntity? {
+        val condoId = doc.getString("condominiumId") ?: expectedCondoId
+        if (condoId != expectedCondoId && condoId != "GENERAL") return null
+
+        val passCode = doc.getString("passCode") ?: doc.id
+        val guestName = doc.getString("guestName") ?: "Visitante"
+        val guestDocument = doc.getString("guestDocument") ?: "Verificar en Caseta"
+        val destinationHouse = doc.getString("destinationHouse") ?: "Casa General"
+        val hostResidentName = doc.getString("hostResidentName") ?: "Residente"
+        val vehiclePlate = doc.getString("vehiclePlate")
+        val passTypeStr = doc.getString("passType") ?: PassType.VISITOR_SINGLE.name
+        val passType = try { PassType.valueOf(passTypeStr) } catch (_: Exception) { PassType.VISITOR_SINGLE }
+        val validUntilMillis = doc.getLong("validUntilMillis") ?: (System.currentTimeMillis() + 86400000L)
+        val maxEntries = doc.getLong("maxEntries")?.toInt() ?: 1
+        val currentEntriesCount = doc.getLong("currentEntriesCount")?.toInt() ?: 0
+        val note = doc.getString("note")
+        val createdAtMillis = doc.getLong("createdAtMillis") ?: System.currentTimeMillis()
+        val isActive = doc.getBoolean("isActive") ?: true
+
+        return QrPassRoomEntity(
+            passCode = passCode,
+            guestName = guestName,
+            guestDocument = guestDocument,
+            destinationHouse = destinationHouse,
+            hostResidentName = hostResidentName,
+            vehiclePlate = vehiclePlate,
+            passType = passType,
+            createdAtMillis = createdAtMillis,
+            validUntilMillis = validUntilMillis,
+            maxEntries = maxEntries,
+            currentEntriesCount = currentEntriesCount,
+            isActive = isActive,
+            note = note
+        )
+    }
+
+    /**
+     * CONSULTA SEGURA DE PASES QR: Restringida estrictamente al ID del usuario residente autenticado.
+     * Aplica obligatoriamente:
+     * 1. Subcolección del condominio verificado.
+     * 2. whereEqualTo("condominiumId", validCondoId).
+     * 3. Filtro por autenticación (userId / residentId / destinationHouse de la unidad).
+     * 4. Filtro de vigencia: solo pases activos, no expirados y con saldo de accesos disponible.
+     */
+    suspend fun queryResidentActiveQrPasses(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        authenticatedUserId: String,
+        unitOrHouseId: String? = null
+    ): Result<List<QrPassRoomEntity>> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            val subcollection = getTenantSubcollection(firestore, validId, SUB_QR_PASSES)
+
+            val matchedDocs = mutableListOf<DocumentSnapshot>()
+
+            // 1. Consulta por userId explícito de Firebase Auth
+            if (authenticatedUserId.isNotBlank()) {
+                val userQuery = subcollection
+                    .whereEqualTo("condominiumId", validId)
+                    .whereEqualTo("userId", authenticatedUserId.trim())
+                    .get()
+                    .await()
+                matchedDocs.addAll(userQuery.documents)
+            }
+
+            // 2. Consulta por residentId de Firebase Auth
+            if (authenticatedUserId.isNotBlank()) {
+                val residentQuery = subcollection
+                    .whereEqualTo("condominiumId", validId)
+                    .whereEqualTo("residentId", authenticatedUserId.trim())
+                    .get()
+                    .await()
+                matchedDocs.addAll(residentQuery.documents)
+            }
+
+            // 3. Consulta por unidad del residente autenticado
+            if (!unitOrHouseId.isNullOrBlank()) {
+                val cleanUnit = unitOrHouseId.trim()
+                val unitQuery = subcollection
+                    .whereEqualTo("condominiumId", validId)
+                    .whereEqualTo("destinationHouse", cleanUnit)
+                    .get()
+                    .await()
+                matchedDocs.addAll(unitQuery.documents)
+            }
+
+            val now = System.currentTimeMillis()
+            val list = matchedDocs.distinctBy { it.id }.mapNotNull { doc ->
+                mapDocToQrPass(doc, validId)
+            }.filter { pass ->
+                pass.isActive && pass.validUntilMillis > now && pass.currentEntriesCount < pass.maxEntries
+            }.sortedBy { it.validUntilMillis }
+
+            Log.i(TAG, "[$validId] Pases QR activos para usuario $authenticatedUserId: ${list.size}")
+            Result.success(list)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error consultando pases QR del residente en Firestore: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Listener en tiempo real de pases QR activos restringidos al residente autenticado.
+     */
+    fun listenToResidentActiveQrPasses(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        authenticatedUserId: String,
+        unitOrHouseId: String? = null,
+        onUpdate: (List<QrPassRoomEntity>) -> Unit,
+        onError: (Exception) -> Unit
+    ): ListenerRegistration {
+        val validId = validateCondominiumId(condominiumId)
+        val subcollection = getTenantSubcollection(firestore, validId, SUB_QR_PASSES)
+        val query = if (!unitOrHouseId.isNullOrBlank()) {
+            subcollection.whereEqualTo("condominiumId", validId).whereEqualTo("destinationHouse", unitOrHouseId.trim())
+        } else {
+            subcollection.whereEqualTo("condominiumId", validId).whereEqualTo("userId", authenticatedUserId.trim())
+        }
+
+        return query.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.e(TAG, "Error en listener de pases QR del residente: ${error.message}")
+                onError(error)
+                return@addSnapshotListener
+            }
+            if (snapshot != null) {
+                val now = System.currentTimeMillis()
+                val list = snapshot.documents.mapNotNull { doc ->
+                    mapDocToQrPass(doc, validId)
+                }.filter { it.isActive && it.validUntilMillis > now && it.currentEntriesCount < it.maxEntries }
+                onUpdate(list.sortedBy { it.validUntilMillis })
+            }
         }
     }
 
@@ -508,7 +773,8 @@ object FirestoreTenantManager {
     suspend fun saveAmenityBooking(
         firestore: FirebaseFirestore,
         condominiumId: String,
-        booking: AmenityBooking
+        booking: AmenityBooking,
+        userId: String? = null
     ): Result<Unit> {
         return try {
             val validId = validateCondominiumId(condominiumId)
@@ -516,6 +782,8 @@ object FirestoreTenantManager {
 
             val payload = hashMapOf(
                 "condominiumId" to validId,
+                "userId" to (userId ?: ""),
+                "residentId" to (userId ?: ""),
                 "folio" to booking.folio,
                 "amenityName" to booking.amenityName,
                 "residentName" to booking.residentName,
@@ -543,6 +811,108 @@ object FirestoreTenantManager {
         } catch (e: Exception) {
             Log.e(TAG, "Error guardando reserva en Firestore: ${e.message}")
             Result.failure(e)
+        }
+    }
+
+    /**
+     * CONSULTA SEGURA DE RESERVAS: Restringida estrictamente al ID del usuario residente autenticado.
+     * Aplica obligatoriamente:
+     * 1. Subcolección del condominio verificado.
+     * 2. whereEqualTo("condominiumId", validCondoId).
+     * 3. Filtro de usuario (userId / residentId / unitId exclusivo del residente autenticado).
+     * 4. Filtro de reservas vigentes o futuras (status != "CANCELADA").
+     */
+    suspend fun queryResidentUpcomingBookings(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        authenticatedUserId: String,
+        unitOrHouseId: String? = null
+    ): Result<List<AmenityBooking>> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            val subcollection = getTenantSubcollection(firestore, validId, SUB_AMENITY_BOOKINGS)
+
+            val matchedDocs = mutableListOf<DocumentSnapshot>()
+
+            // 1. Consulta por userId explícito de Firebase Auth
+            if (authenticatedUserId.isNotBlank()) {
+                val userQuery = subcollection
+                    .whereEqualTo("condominiumId", validId)
+                    .whereEqualTo("userId", authenticatedUserId.trim())
+                    .get()
+                    .await()
+                matchedDocs.addAll(userQuery.documents)
+            }
+
+            // 2. Consulta por residentId de Firebase Auth
+            if (authenticatedUserId.isNotBlank()) {
+                val residentQuery = subcollection
+                    .whereEqualTo("condominiumId", validId)
+                    .whereEqualTo("residentId", authenticatedUserId.trim())
+                    .get()
+                    .await()
+                matchedDocs.addAll(residentQuery.documents)
+            }
+
+            // 3. Consulta por número de casa / unidad del residente autenticado
+            if (!unitOrHouseId.isNullOrBlank()) {
+                val cleanUnit = unitOrHouseId.trim()
+                val unitQuery = subcollection
+                    .whereEqualTo("condominiumId", validId)
+                    .whereEqualTo("unitId", cleanUnit)
+                    .get()
+                    .await()
+                matchedDocs.addAll(unitQuery.documents)
+            }
+
+            // Ventana de tiempo: desde hace 4 horas hasta el futuro (para ver las activas de hoy y futuras)
+            val windowStart = System.currentTimeMillis() - (4 * 3600 * 1000L)
+            val list = matchedDocs.distinctBy { it.id }.mapNotNull { doc ->
+                mapDocToAmenityBooking(doc, validId)
+            }.filter { booking ->
+                booking.status != "CANCELADA" && booking.bookingTimeMillis >= windowStart
+            }.sortedBy { it.bookingTimeMillis }
+
+            Log.i(TAG, "[$validId] Reservas próximas para usuario $authenticatedUserId: ${list.size}")
+            Result.success(list)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error consultando reservas del residente en Firestore: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Listener en tiempo real de reservas de amenidades restringidas al residente autenticado.
+     */
+    fun listenToResidentUpcomingBookings(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        authenticatedUserId: String,
+        unitOrHouseId: String? = null,
+        onUpdate: (List<AmenityBooking>) -> Unit,
+        onError: (Exception) -> Unit
+    ): ListenerRegistration {
+        val validId = validateCondominiumId(condominiumId)
+        val subcollection = getTenantSubcollection(firestore, validId, SUB_AMENITY_BOOKINGS)
+        val query = if (!unitOrHouseId.isNullOrBlank()) {
+            subcollection.whereEqualTo("condominiumId", validId).whereEqualTo("unitId", unitOrHouseId.trim())
+        } else {
+            subcollection.whereEqualTo("condominiumId", validId).whereEqualTo("userId", authenticatedUserId.trim())
+        }
+
+        return query.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                Log.e(TAG, "Error en listener de reservas del residente: ${error.message}")
+                onError(error)
+                return@addSnapshotListener
+            }
+            if (snapshot != null) {
+                val windowStart = System.currentTimeMillis() - (4 * 3600 * 1000L)
+                val list = snapshot.documents.mapNotNull { doc ->
+                    mapDocToAmenityBooking(doc, validId)
+                }.filter { it.status != "CANCELADA" && it.bookingTimeMillis >= windowStart }
+                onUpdate(list.sortedBy { it.bookingTimeMillis })
+            }
         }
     }
 
@@ -721,5 +1091,153 @@ object FirestoreTenantManager {
             notes = notes,
             createdAtMillis = createdAtMillis
         )
+    }
+
+    /**
+     * Guarda o actualiza un Perfil de Usuario con aislamiento de condominio estricto en Firestore.
+     * Persiste en /condominiums/{condoId}/users/{userId} y /condominiums/{condoId}/user_profiles/{userId}.
+     */
+    suspend fun saveUserProfile(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        profile: FirestoreUserProfile
+    ): Result<Unit> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            val subcollectionUsers = getTenantSubcollection(firestore, validId, SUB_USERS)
+            val subcollectionProfiles = getTenantSubcollection(firestore, validId, SUB_USER_PROFILES)
+
+            val payload = profile.toMap().toMutableMap().apply {
+                put("condominiumId", validId)
+            }
+
+            // Guardar en la colección de usuarios del condominio
+            subcollectionUsers.document(profile.userId)
+                .set(payload, SetOptions.merge())
+                .await()
+
+            // Mantener sincronizado en user_profiles
+            subcollectionProfiles.document(profile.userId)
+                .set(payload, SetOptions.merge())
+                .await()
+
+            Log.i(TAG, "[$validId] Perfil de usuario ${profile.displayName} (${profile.userId}) guardado exitosamente.")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error guardando perfil de usuario en Firestore: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Consulta el Perfil de Usuario en Firestore respetando el aislamiento por condominio.
+     */
+    suspend fun getUserProfile(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        userId: String
+    ): Result<FirestoreUserProfile?> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            val docRef = getTenantSubcollection(firestore, validId, SUB_USERS).document(userId.trim())
+            val snapshot = docRef.get().await()
+            if (snapshot.exists()) {
+                val profile = FirestoreUserProfile.fromDocumentSnapshot(snapshot, validId)
+                Result.success(profile)
+            } else {
+                // Fallback a user_profiles
+                val fallbackRef = getTenantSubcollection(firestore, validId, SUB_USER_PROFILES).document(userId.trim())
+                val fallbackSnapshot = fallbackRef.get().await()
+                if (fallbackSnapshot.exists()) {
+                    val profile = FirestoreUserProfile.fromDocumentSnapshot(fallbackSnapshot, validId)
+                    Result.success(profile)
+                } else {
+                    Result.success(null)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error consultando perfil de usuario en Firestore: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Consulta perfiles de usuario por condominio y filtro opcional por rol.
+     */
+    suspend fun queryUserProfiles(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        role: String? = null,
+        limitCount: Long = 50
+    ): Result<List<FirestoreUserProfile>> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            var query = buildIsolatedQuery(firestore, validId, SUB_USERS)
+            if (!role.isNullOrBlank()) {
+                query = query.whereEqualTo("role", role.trim().uppercase())
+            }
+            val snapshot = query.limit(limitCount).get().await()
+            val profiles = snapshot.documents.mapNotNull { doc ->
+                FirestoreUserProfile.fromDocumentSnapshot(doc, validId)
+            }
+            Result.success(profiles)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error consultando perfiles de usuario: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Guarda una reserva de área común directamente utilizando el esquema FirestoreAmenityBooking.
+     */
+    suspend fun saveAmenityBookingModel(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        booking: FirestoreAmenityBooking
+    ): Result<Unit> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            val subcollection = getTenantSubcollection(firestore, validId, SUB_AMENITY_BOOKINGS)
+
+            val payload = booking.toMap().toMutableMap().apply {
+                put("condominiumId", validId)
+            }
+
+            subcollection.document(booking.folio)
+                .set(payload, SetOptions.merge())
+                .await()
+
+            Log.i(TAG, "[$validId] FirestoreAmenityBooking ${booking.folio} (${booking.amenityName}) guardado exitosamente.")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error guardando FirestoreAmenityBooking: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Consulta reservas de áreas comunes fuertemente tipadas en FirestoreAmenityBooking con aislamiento.
+     */
+    suspend fun queryAmenityBookingModels(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        unitNumber: String? = null,
+        limitCount: Long = 50
+    ): Result<List<FirestoreAmenityBooking>> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            var query = buildIsolatedQuery(firestore, validId, SUB_AMENITY_BOOKINGS)
+            if (!unitNumber.isNullOrBlank()) {
+                query = query.whereEqualTo("authorizedUnitNumber", unitNumber.trim())
+            }
+            val snapshot = query.limit(limitCount).get().await()
+            val bookings = snapshot.documents.mapNotNull { doc ->
+                FirestoreAmenityBooking.fromDocumentSnapshot(doc, validId)
+            }
+            Result.success(bookings)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error consultando reservas de áreas comunes: ${e.message}")
+            Result.failure(e)
+        }
     }
 }

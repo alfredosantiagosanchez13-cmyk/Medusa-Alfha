@@ -1,24 +1,67 @@
 package com.example.data.visitor
 
+import android.util.Log
 import com.example.data.core.AlphaCoreEngine
+import com.example.data.firebase.FirebaseConfigHelper
+import com.example.data.firebase.FirestoreTenantManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
-class VisitorCheckInRepository(private val visitorCheckInDao: VisitorCheckInDao) {
+class VisitorCheckInRepository(
+    private val visitorCheckInDao: VisitorCheckInDao,
+    var activeCondominiumId: String = "PRADOS_1"
+) {
 
     val allCheckIns: Flow<List<VisitorCheckIn>> = visitorCheckInDao.getAllCheckIns()
 
     suspend fun insertCheckIn(checkIn: VisitorCheckIn): Long {
-        return visitorCheckInDao.insertCheckIn(checkIn)
+        val id = visitorCheckInDao.insertCheckIn(checkIn)
+        val inserted = checkIn.copy(id = id)
+        // Sincronizar automáticamente en Firestore /condominiums/{condoId}/visitor_logs
+        withContext(Dispatchers.IO) {
+            val fs = FirebaseConfigHelper.getFirestore()
+            if (fs != null) {
+                try {
+                    FirestoreTenantManager.saveVisitorCheckIn(fs, activeCondominiumId, inserted)
+                } catch (e: Exception) {
+                    Log.w("VisitorCheckInRepo", "Firestore sync diferido: ${e.message}")
+                }
+            }
+        }
+        return id
     }
 
     suspend fun updateCheckInStatus(id: Long, status: String, notes: String? = null) {
         visitorCheckInDao.updateCheckInStatus(id, status, notes)
+        withContext(Dispatchers.IO) {
+            val fs = FirebaseConfigHelper.getFirestore()
+            if (fs != null) {
+                try {
+                    val all = visitorCheckInDao.getAllCheckInsList()
+                    val target = all.firstOrNull { it.id == id }
+                    if (target != null) {
+                        FirestoreTenantManager.saveVisitorCheckIn(fs, activeCondominiumId, target)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     suspend fun registerCheckOut(id: Long, notes: String? = "Salida confirmada en garita") {
         visitorCheckInDao.registerCheckOut(id, notes = notes)
+        withContext(Dispatchers.IO) {
+            val fs = FirebaseConfigHelper.getFirestore()
+            if (fs != null) {
+                try {
+                    val all = visitorCheckInDao.getAllCheckInsList()
+                    val target = all.firstOrNull { it.id == id }
+                    if (target != null) {
+                        FirestoreTenantManager.saveVisitorCheckIn(fs, activeCondominiumId, target)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
     }
 
     suspend fun updateResidentNotes(id: Long, notes: String?) {

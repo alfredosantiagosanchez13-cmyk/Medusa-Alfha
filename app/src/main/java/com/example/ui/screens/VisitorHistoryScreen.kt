@@ -25,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.ExitToApp
@@ -39,6 +41,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -218,6 +221,46 @@ fun VisitorHistoryScreen(
                         color = ErrorRed,
                         modifier = Modifier.weight(1f)
                     )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Firestore Database Schema Status Badge
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF0F172A),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, CyanNeon.copy(alpha = 0.35f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudDone,
+                                contentDescription = null,
+                                tint = CyanNeon,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Esquema Firestore /visitor_logs",
+                                color = CyanNeon,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            text = "timestamp • visitorName • authorizedUnitNumber",
+                            color = GoldPrimary,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }
@@ -513,7 +556,7 @@ fun HistoryLogCard(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(Icons.Default.House, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(13.dp))
-                        Text(text = entry.destinationHouse, color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(text = "Unidad ${entry.authorizedUnitNumber}", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -710,19 +753,46 @@ fun VisitorDetailDialog(
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    DetailRow(label = "Visitante", value = entry.visitorName, icon = Icons.Default.Person)
+                    DetailRow(label = "Visitante (visitorName)", value = entry.visitorName, icon = Icons.Default.Person)
                     DetailRow(label = "Documento RUT", value = entry.visitorDocument, icon = Icons.Default.Badge)
-                    DetailRow(label = "Unidad Destino", value = entry.destinationHouse, icon = Icons.Default.House)
+                    DetailRow(label = "Unidad Autorizada", value = entry.authorizedUnitNumber, icon = Icons.Default.House)
                     DetailRow(label = "Tipo de Pase", value = "${entry.passTypeLabel} (${entry.passCode})", icon = Icons.Default.QrCode)
                     if (!entry.vehiclePlate.isNullOrEmpty()) {
                         DetailRow(label = "Patente Vehículo", value = entry.vehiclePlate, icon = Icons.Default.DirectionsCar)
                     }
-                    DetailRow(label = "Entrada", value = formattedFullDate, icon = Icons.Default.Schedule)
+                    DetailRow(label = "Timestamp (timestamp)", value = formattedFullDate, icon = Icons.Default.Schedule)
                     entry.formattedCheckOutTime?.let { outTime ->
                         DetailRow(label = "Salida", value = outTime, icon = Icons.Default.ExitToApp)
                     }
                     entry.durationStay?.let { stay ->
                         DetailRow(label = "Permanencia", value = stay, icon = Icons.Default.Timer)
+                    }
+                }
+
+                // Esquema Firestore Cloud Database
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF0F172A),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, CyanNeon.copy(alpha = 0.4f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CloudSync, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Esquema Firestore /visitor_logs",
+                                color = CyanNeon,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text("• timestamp: ${entry.timestampMillis} ms (Firestore Timestamp)", color = Color.White.copy(alpha = 0.85f), fontSize = 10.sp)
+                        Text("• visitorName: \"${entry.visitorName}\"", color = Color.White.copy(alpha = 0.85f), fontSize = 10.sp)
+                        Text("• authorizedUnitNumber: \"${entry.authorizedUnitNumber}\"", color = Color.White.copy(alpha = 0.85f), fontSize = 10.sp)
                     }
                 }
 

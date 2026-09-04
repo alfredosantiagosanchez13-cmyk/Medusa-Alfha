@@ -76,7 +76,8 @@ enum class CondoTarget(val displayName: String, val shortTag: String, val locati
  * Sub-herramientas oficiales del Módulo de Seguridad Caseta de MEDUSA ALFHA.
  */
 enum class CasetaSubTool(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val badge: String? = null) {
-    ACCESOS("Accesos", Icons.Default.QrCodeScanner, "QR"),
+    DASHBOARD_MOVIL("01 Dashboard", Icons.Default.Dashboard, "01"),
+    ACCESOS("02 Accesos Garita", Icons.Default.QrCodeScanner, "02"),
     PLACAS("Placas", Icons.Default.DirectionsCar, "AUTO"),
     VISITANTES("Visitantes", Icons.Default.People, "VISITA"),
     PAQUETERIA("Paquetería", Icons.Default.Inventory2, "WHATS"),
@@ -523,6 +524,13 @@ fun CasetaSecurityHub(
         // 3. RENDERIZADO DEL SUB-MÓDULO CON INFORMACIÓN AISLADA
         // =========================================================
         when (currentSubTool) {
+            CasetaSubTool.DASHBOARD_MOVIL -> {
+                MedusaTacticalDashboardHub(
+                    db = db,
+                    onNavigateToTab = onNavigateToTab,
+                    onTriggerScan = { onNavigateToTab(ActiveScreenTab.SCANNER) }
+                )
+            }
             CasetaSubTool.ACCESOS -> {
                 CasetaAccesosIsolatedSection(
                     condo = selectedCondo,
@@ -617,6 +625,32 @@ fun CasetaAccesosIsolatedSection(
     val scope = rememberCoroutineScope()
     var manualCode by remember { mutableStateOf("") }
     var activeVerificationResult by remember { mutableStateOf<VerificationResult?>(null) }
+    var showExpressModal by remember { mutableStateOf(false) }
+
+    // Express Access Form state
+    var expressName by remember { mutableStateOf("") }
+    var expressUnit by remember(condo) { mutableStateOf(if (condo == CondoTarget.PARAISO) "Casa 01" else "Calle 1 #01") }
+    var expressType by remember { mutableStateOf("Visita") }
+    var expressPlate by remember { mutableStateOf("") }
+    var expressHost by remember { mutableStateOf("") }
+
+    // Filter for recent entries
+    var selectedFilter by remember { mutableStateOf("TODOS") }
+
+    val activeCount = remember(condoCheckIns) {
+        condoCheckIns.count { it.status == "CHECKED_IN" || it.status == "VERIFIED" }
+    }
+    val departedCount = remember(condoCheckIns) {
+        condoCheckIns.count { it.status == "DEPARTED" }
+    }
+
+    val filteredCheckIns = remember(condoCheckIns, selectedFilter) {
+        when (selectedFilter) {
+            "EN_PREDIO" -> condoCheckIns.filter { it.status == "CHECKED_IN" || it.status == "VERIFIED" }
+            "SALIDAS" -> condoCheckIns.filter { it.status == "DEPARTED" }
+            else -> condoCheckIns
+        }
+    }
 
     fun verifyCode(code: String) {
         scope.launch {
@@ -634,6 +668,225 @@ fun CasetaAccesosIsolatedSection(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // KPI Metrics Row
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = NavyCard,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.35f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("${condoPasses.size}", color = CyanNeon, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                        Text("PASES VIGENTES", color = TextMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = NavyCard,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.35f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("$activeCount", color = SuccessGreen, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                        Text("EN CONDOMINIO", color = TextMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = NavyCard,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.35f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("$departedCount", color = GoldPrimary, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                        Text("SALIDAS HOY", color = TextMuted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Express Registration Action Button
+        item {
+            Button(
+                onClick = { showExpressModal = !showExpressModal },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (showExpressModal) ErrorRed else GoldPrimary,
+                    contentColor = NavyDark
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(42.dp)
+                    .testTag("btn_express_access")
+            ) {
+                Icon(
+                    imageVector = if (showExpressModal) Icons.Default.Close else Icons.Default.AddCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (showExpressModal) "CANCELAR REGISTRO EXPRESS" else "+ REGISTRAR ACCESO EXPRESS (SIN QR)",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        // Express Modal Card if active
+        if (showExpressModal) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = NavyCard),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, GoldPrimary)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "⚡ REGISTRO EXPRESS DE ACCESO EN ${condo.displayName.uppercase()}",
+                            color = GoldPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf("Visita", "Proveedor", "Paquetería", "Servicio").forEach { type ->
+                                FilterChip(
+                                    selected = expressType == type,
+                                    onClick = { expressType = type },
+                                    label = { Text(type, fontSize = 11.sp) }
+                                )
+                            }
+                        }
+
+                        OutlinedTextField(
+                            value = expressName,
+                            onValueChange = { expressName = it },
+                            label = { Text("Nombre Completo *", fontSize = 11.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = GoldPrimary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = expressUnit,
+                                onValueChange = { expressUnit = it },
+                                label = { Text("Destino (${condo.shortTag})", fontSize = 11.sp) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = GoldPrimary
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = expressPlate,
+                                onValueChange = { expressPlate = it },
+                                label = { Text("Placa (Opcional)", fontSize = 11.sp) },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = GoldPrimary
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        OutlinedTextField(
+                            value = expressHost,
+                            onValueChange = { expressHost = it },
+                            label = { Text("Residente Anfitrión (Opcional)", fontSize = 11.sp) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = GoldPrimary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Button(
+                            onClick = {
+                                if (expressName.isNotBlank()) {
+                                    val folio = AlphaCoreEngine.generateUniqueFolio("ACC")
+                                    scope.launch {
+                                        visitorRepo.insertCheckIn(
+                                            VisitorCheckIn(
+                                                folio = folio,
+                                                visitorName = expressName.trim(),
+                                                visitorDocument = "ID Express en Caseta",
+                                                destinationHouse = expressUnit.trim(),
+                                                passCode = folio,
+                                                passTypeLabel = expressType,
+                                                vehiclePlate = expressPlate.trim().uppercase(),
+                                                status = "CHECKED_IN",
+                                                guardNotes = "Registro express en caseta ${condo.displayName}",
+                                                hostResidentName = expressHost.ifBlank { "Anfitrión ${condo.shortTag}" }
+                                            )
+                                        )
+                                        ResidentNotificationManager.notifyCustomVisitorEntry(
+                                            context = context,
+                                            guestName = expressName.trim(),
+                                            destinationHouse = expressUnit.trim(),
+                                            hostResidentName = expressHost.ifBlank { "Residente" },
+                                            passTypeLabel = expressType,
+                                            vehiclePlate = expressPlate.trim().uppercase()
+                                        )
+                                        showExpressModal = false
+                                        expressName = ""
+                                        expressPlate = ""
+                                        Toast.makeText(context, "✅ INGRESO EXPRESS AUTORIZADO ($folio)", Toast.LENGTH_LONG).show()
+                                    }
+                                } else {
+                                    Toast.makeText(context, "⚠️ Ingrese el nombre del visitante", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color.White),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("AUTORIZAR INGRESO Y NOTIFICAR", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Camera Scanner and Manual Input
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = NavyCard),
@@ -691,6 +944,7 @@ fun CasetaAccesosIsolatedSection(
             }
         }
 
+        // Registered passes in condo
         item {
             Text(
                 "⚡ PASES REGISTRADOS EN ${condo.displayName.uppercase()} (${condoPasses.size})",
@@ -731,14 +985,43 @@ fun CasetaAccesosIsolatedSection(
             }
         }
 
+        // Recent entries with filter chips
         item {
-            Text(
-                "🟢 INGRESOS RECIENTES EN ${condo.displayName.uppercase()} (${condoCheckIns.size})",
-                color = TextMuted,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
-            )
-            val entries = condoCheckIns.map { it.toVisitorEntry() }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "🟢 INGRESOS RECIENTES (${filteredCheckIns.size})",
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    FilterChip(
+                        selected = selectedFilter == "TODOS",
+                        onClick = { selectedFilter = "TODOS" },
+                        label = { Text("Todos", fontSize = 10.sp) },
+                        modifier = Modifier.height(28.dp)
+                    )
+                    FilterChip(
+                        selected = selectedFilter == "EN_PREDIO",
+                        onClick = { selectedFilter = "EN_PREDIO" },
+                        label = { Text("En Predio", fontSize = 10.sp) },
+                        modifier = Modifier.height(28.dp)
+                    )
+                    FilterChip(
+                        selected = selectedFilter == "SALIDAS",
+                        onClick = { selectedFilter = "SALIDAS" },
+                        label = { Text("Salidas", fontSize = 10.sp) },
+                        modifier = Modifier.height(28.dp)
+                    )
+                }
+            }
+
+            val entries = filteredCheckIns.map { it.toVisitorEntry() }
             RecentVisitorEntriesList(
                 entries = entries,
                 onStatusChange = { entry, newStatus ->

@@ -39,6 +39,8 @@ data class VerificationResult(
     val failureReason: String? = null,
     val condominiumId: String? = null,
     val isFirestoreValidated: Boolean = false,
+    val hostResidentPhone: String? = null,
+    val hostResidentEmail: String? = null,
     val verificationTimestamp: Long = System.currentTimeMillis()
 )
 

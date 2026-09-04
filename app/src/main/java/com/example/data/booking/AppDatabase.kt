@@ -37,6 +37,8 @@ import com.example.data.vehicle.VehicleDao
 import com.example.data.sync.SyncQueueDao
 import com.example.data.sync.SyncQueueEntity
 import com.example.data.vehicle.VehicleEntity
+import com.example.data.profile.UserProfileDao
+import com.example.data.profile.UserProfileEntity
 import com.example.data.visitor.VisitorCheckIn
 import com.example.data.visitor.VisitorCheckInDao
 
@@ -44,6 +46,7 @@ import com.example.data.visitor.VisitorCheckInDao
     entities = [
         AmenityBooking::class,
         VisitorCheckIn::class,
+        UserProfileEntity::class,
         AiGuardChatLog::class,
         QrPassRoomEntity::class,
         IncidentEntity::class,
@@ -62,12 +65,13 @@ import com.example.data.visitor.VisitorCheckInDao
         SyncQueueEntity::class,
         FieldValidationTestEntity::class
     ],
-    version = 19,
+    version = 20,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun amenityBookingDao(): AmenityBookingDao
     abstract fun visitorCheckInDao(): VisitorCheckInDao
+    abstract fun userProfileDao(): UserProfileDao
     abstract fun aiGuardChatLogDao(): AiGuardChatLogDao
     abstract fun qrPassDao(): QrPassDao
     abstract fun incidentDao(): IncidentDao

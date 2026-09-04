@@ -39,6 +39,9 @@ data class VisitorCheckIn(
     val residentNotes: String? = null,
     val hostResidentName: String = "Residente Anfitrión"
 ) {
+    val authorizedUnitNumber: String
+        get() = destinationHouse
+
     val formattedTime: String
         get() = SimpleDateFormat("HH:mm:ss - dd/MM/yyyy", Locale.getDefault()).format(Date(timestampMillis))
 

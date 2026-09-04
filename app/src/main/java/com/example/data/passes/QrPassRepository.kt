@@ -5,6 +5,7 @@ import com.example.data.firebase.FirestoreTenantManager
 import com.example.scanner.PassStatus
 import com.example.scanner.PassType
 import com.example.scanner.QrPassEntity
+import com.example.scanner.QrPayloadParser
 import com.example.scanner.VerificationResult
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
@@ -38,8 +39,11 @@ class QrPassRepository(private val qrPassDao: QrPassDao) {
         currentCondominiumId: String? = null,
         firestore: FirebaseFirestore? = null
     ): VerificationResult = withContext(Dispatchers.IO) {
-        val cleanCode = code.trim()
+        val cleanCode = QrPayloadParser.extractEntryCode(code)
         val targetCondoId = currentCondominiumId?.uppercase()?.trim()
+
+        var hostResidentPhone: String? = null
+        var hostResidentEmail: String? = null
 
         // 1. Verificación en tiempo real contra Firestore si hay instancia disponible
         if (firestore != null && !targetCondoId.isNullOrEmpty()) {
@@ -64,6 +68,40 @@ class QrPassRepository(private val qrPassDao: QrPassDao) {
             if (firestorePass != null) {
                 // Guardar / actualizar en Room local para disponibilidad offline
                 qrPassDao.insertPass(firestorePass)
+            } else {
+                // Si no está en 'qr_passes', buscar a través de DataRepository en colecciones 'visitors' y 'residents'
+                try {
+                    val dataRepo = com.example.data.DataRepository(firestore, targetCondoId)
+                    val residentEntryRes = dataRepo.verifyResidentEntryCode(cleanCode, targetCondoId).getOrNull()
+                    if (residentEntryRes != null && residentEntryRes.visitor != null) {
+                        val v = residentEntryRes.visitor
+                        val r = residentEntryRes.resident
+                        hostResidentPhone = r?.phone
+                        hostResidentEmail = r?.email
+
+                        val mappedPass = QrPassRoomEntity(
+                            passCode = cleanCode,
+                            guestName = v.visitorName.ifBlank { "Visitante Registrado" },
+                            guestDocument = v.visitorDocument.ifBlank { "Verificar en Garita" },
+                            destinationHouse = v.authorizedUnitNumber.ifBlank { "Unidad ${r?.unitId ?: ""}" },
+                            hostResidentName = v.hostResidentName.ifBlank { r?.fullName ?: "Residente Anfitrión" },
+                            vehiclePlate = v.vehiclePlate.takeIf { it.isNotBlank() },
+                            passType = when (v.visitType.uppercase()) {
+                                "DELIVERY" -> PassType.DELIVERY_SERVICE
+                                "EVENT", "EVENTO" -> PassType.EVENT_GUEST
+                                "FREQUENT", "FRECUENTE" -> PassType.RESIDENT_PERMANENT
+                                else -> PassType.VISITOR_SINGLE
+                            },
+                            validUntilMillis = System.currentTimeMillis() + 86400000L,
+                            maxEntries = v.maxEntries,
+                            currentEntriesCount = v.currentEntries,
+                            note = v.notes
+                        )
+                        qrPassDao.insertPass(mappedPass)
+                    }
+                } catch (e: Exception) {
+                    // Continuar con verificación local
+                }
             }
         }
 
@@ -174,7 +212,9 @@ class QrPassRepository(private val qrPassDao: QrPassDao) {
                 qrPass = qrPass,
                 failureReason = "El pase expiró el ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(roomEntity.validUntilMillis))}.",
                 condominiumId = targetCondoId,
-                isFirestoreValidated = firestore != null
+                isFirestoreValidated = firestore != null,
+                hostResidentPhone = hostResidentPhone,
+                hostResidentEmail = hostResidentEmail
             )
         }
 
@@ -185,7 +225,9 @@ class QrPassRepository(private val qrPassDao: QrPassDao) {
                 qrPass = qrPass,
                 failureReason = "Este pase único ya alcanzó su límite (${roomEntity.currentEntriesCount}/${roomEntity.maxEntries} usos).",
                 condominiumId = targetCondoId,
-                isFirestoreValidated = firestore != null
+                isFirestoreValidated = firestore != null,
+                hostResidentPhone = hostResidentPhone,
+                hostResidentEmail = hostResidentEmail
             )
         }
 
@@ -194,7 +236,9 @@ class QrPassRepository(private val qrPassDao: QrPassDao) {
             status = PassStatus.VALID,
             qrPass = qrPass,
             condominiumId = targetCondoId,
-            isFirestoreValidated = firestore != null
+            isFirestoreValidated = firestore != null,
+            hostResidentPhone = hostResidentPhone,
+            hostResidentEmail = hostResidentEmail
         )
     }
 

@@ -194,7 +194,58 @@ class FirebaseFirestoreSyncService(
                 }
             }
 
-            Log.i(tag, "[$validCondoId] Listeners en tiempo real de Firestore activados con aislamiento total.")
+            // 3. Escucha en tiempo real del esquema oficial de Visitor Logs (/visitor_logs)
+            val visitorLogsQuery = FirestoreTenantManager.buildIsolatedQuery(
+                firestore = fs,
+                condominiumId = validCondoId,
+                subcollectionName = FirestoreTenantManager.SUB_VISITOR_LOGS
+            )
+
+            accessLogsListener = visitorLogsQuery.addSnapshotListener { snapshots, error ->
+                if (error != null) {
+                    Log.e(tag, "[$validCondoId] Error en listener de visitor_logs: ${error.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshots != null && !snapshots.isEmpty) {
+                    scope.launch {
+                        for (doc in snapshots.documents) {
+                            try {
+                                val docCondoId = doc.getString("condominiumId")
+                                if (docCondoId != null && !docCondoId.equals(validCondoId, ignoreCase = true)) {
+                                    continue
+                                }
+                                val visitorLog = FirestoreTenantManager.mapDocToVisitorLog(doc, validCondoId)
+                                if (visitorLog != null) {
+                                    val existing = db.visitorCheckInDao().getCheckInByFolio(visitorLog.folio)
+                                    if (existing == null) {
+                                        db.visitorCheckInDao().insertCheckIn(visitorLog.toVisitorCheckIn())
+                                    } else {
+                                        // Actualizar status y notas si cambiaron
+                                        if (existing.status != visitorLog.status || existing.checkOutMillis != visitorLog.checkOutMillis) {
+                                            if (visitorLog.status.equals("DEPARTED", ignoreCase = true)) {
+                                                db.visitorCheckInDao().registerCheckOut(
+                                                    id = existing.id,
+                                                    notes = visitorLog.guardNotes ?: "Salida sincronizada de Firestore"
+                                                )
+                                            } else {
+                                                db.visitorCheckInDao().updateCheckInStatus(
+                                                    id = existing.id,
+                                                    status = visitorLog.status,
+                                                    notes = visitorLog.guardNotes
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.w(tag, "Error procesando visitor_log desde Firestore: ${e.message}")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Log.i(tag, "[$validCondoId] Listeners en tiempo real de Firestore (Incidencias, Pases QR y Visitor Logs) activados con aislamiento total.")
         } catch (e: Exception) {
             Log.e(tag, "Fallo al iniciar listeners con aislamiento: ${e.message}")
             _isListening.value = false
@@ -215,13 +266,26 @@ class FirebaseFirestoreSyncService(
     }
 
     /**
-     * Sube un registro de acceso de visitante a Firestore bajo el condominio correspondiente.
+     * Sube un registro de acceso de visitante a Firestore bajo el condominio correspondiente
+     * aplicando el esquema oficial (timestamp, visitorName, authorizedUnitNumber).
      */
     suspend fun pushVisitorCheckInToFirestore(visitor: VisitorCheckIn, condominiumId: String = _activeCondominiumId.value): Result<Unit> {
         val fs = firestore ?: return Result.failure(IllegalStateException("Firestore no disponible."))
         val result = FirestoreTenantManager.saveVisitorCheckIn(fs, condominiumId, visitor)
         if (result.isSuccess) {
-            _syncStatus.value = "Acceso ${visitor.folio} sincronizado en [$condominiumId]."
+            _syncStatus.value = "Visitor Log ${visitor.folio} sincronizado en Firestore [$condominiumId]."
+        }
+        return result
+    }
+
+    /**
+     * Sube directamente una entidad estructurada FirestoreVisitorLog al esquema /visitor_logs.
+     */
+    suspend fun pushVisitorLogToFirestore(visitorLog: com.example.data.visitor.FirestoreVisitorLog, condominiumId: String = _activeCondominiumId.value): Result<Unit> {
+        val fs = firestore ?: return Result.failure(IllegalStateException("Firestore no disponible."))
+        val result = FirestoreTenantManager.saveVisitorLog(fs, condominiumId, visitorLog)
+        if (result.isSuccess) {
+            _syncStatus.value = "Visitor Log ${visitorLog.folio} (${visitorLog.visitorName} -> ${visitorLog.authorizedUnitNumber}) sincronizado en [$condominiumId]."
         }
         return result
     }

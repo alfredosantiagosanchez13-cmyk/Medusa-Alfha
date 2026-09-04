@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.AssignmentLate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.History
@@ -111,6 +112,7 @@ import com.example.ui.components.AmenityBookingHub
 import com.example.ui.components.ResidentManagementHub
 import com.example.ui.components.VehicleAccessControlHub
 import com.example.ui.components.QrGeneratorDialog
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.EventAvailable
@@ -130,27 +132,30 @@ import com.example.ui.theme.NavyDark
 import com.example.ui.theme.NavySurface
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.components.CasetaSecurityHub
+import com.example.ui.components.MedusaTacticalDashboardHub
 import com.example.ui.theme.TextMuted
 import com.example.utils.ResidentNotificationManager
 import kotlinx.coroutines.launch
 
 enum class ActiveScreenTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    CASETA("Caseta Táctica", Icons.Default.Security),
-    VECINOS_PORTAL("MEDUSA Vecinos", Icons.Default.Home),
-    SCANNER("Escáner Rápido", Icons.Default.QrCodeScanner),
-    VALIDATION("Validación", Icons.Default.FactCheck),
-    VEHICLES("Vehículos", Icons.Default.DirectionsCar),
-    RESIDENTS("Residentes", Icons.Default.People),
-    MAINTENANCE("Mantenimiento", Icons.Default.Build),
-    AMENITIES("Amenidades", Icons.Default.EventAvailable),
-    PACKAGES("Paquetería", Icons.Default.Inventory2),
-    INCIDENTS("Incidencias", Icons.Default.AssignmentLate),
-    GENERATOR("Generar QR", Icons.Default.QrCode),
-    SUPERVISION("Supervisión", Icons.Default.Shield),
-    MASTER_ALPHA("Panel Maestro", Icons.Default.Schedule),
-    HISTORY("Historial", Icons.Default.History),
-    ANALYTICS("Analítica", Icons.Default.Analytics),
-    AI_COPILOT("Copiloto AI", Icons.Default.AutoAwesome)
+    RESIDENT_DASHBOARD("00 Mi Residencia", Icons.Default.AccountCircle),
+    DASHBOARD("01 Dashboard", Icons.Default.Dashboard),
+    CASETA("02 Caseta Táctica", Icons.Default.Security),
+    VECINOS_PORTAL("03 Vecinos", Icons.Default.Home),
+    SCANNER("04 Escáner Rápido", Icons.Default.QrCodeScanner),
+    VALIDATION("05 Validación", Icons.Default.FactCheck),
+    VEHICLES("06 Vehículos", Icons.Default.DirectionsCar),
+    RESIDENTS("07 Residentes", Icons.Default.People),
+    MAINTENANCE("08 Mantenimiento", Icons.Default.Build),
+    AMENITIES("09 Amenidades", Icons.Default.EventAvailable),
+    PACKAGES("10 Paquetería", Icons.Default.Inventory2),
+    INCIDENTS("11 Incidencias", Icons.Default.AssignmentLate),
+    GENERATOR("12 Generar QR", Icons.Default.QrCode),
+    SUPERVISION("13 Supervisión", Icons.Default.Shield),
+    MASTER_ALPHA("14 Panel Maestro", Icons.Default.Schedule),
+    HISTORY("15 Historial", Icons.Default.History),
+    ANALYTICS("16 Analítica", Icons.Default.Analytics),
+    AI_COPILOT("17 Copiloto AI", Icons.Default.AutoAwesome)
 }
 
 @Composable
@@ -177,13 +182,13 @@ fun SecurityScannerScreen() {
         roomCheckIns.map { it.toVisitorEntry() }
     }
 
-    var currentTab by remember { mutableStateOf(ActiveScreenTab.CASETA) }
+    var currentTab by remember { mutableStateOf(ActiveScreenTab.SCANNER) }
     var activeVerificationResult by remember { mutableStateOf<VerificationResult?>(null) }
     var showQrGeneratorDialog by remember { mutableStateOf(false) }
     var manualCodeInput by remember { mutableStateOf("") }
     var activePanicAlert by remember { mutableStateOf<PanicAlertEvent?>(null) }
     var showFirebaseCloudDialog by remember { mutableStateOf(false) }
-    var showSplash by remember { mutableStateOf(true) }
+    var showSplash by remember { mutableStateOf(false) }
     var showPhilosophyDialog by remember { mutableStateOf(false) }
 
     fun verifyPassCode(code: String) {
@@ -369,6 +374,18 @@ fun SecurityScannerScreen() {
                 Spacer(modifier = Modifier.height(8.dp))
 
             when (currentTab) {
+                ActiveScreenTab.RESIDENT_DASHBOARD -> {
+                    ResidentDashboardScreen()
+                }
+
+                ActiveScreenTab.DASHBOARD -> {
+                    MedusaTacticalDashboardHub(
+                        db = db,
+                        onNavigateToTab = { currentTab = it },
+                        onTriggerScan = { currentTab = ActiveScreenTab.SCANNER }
+                    )
+                }
+
                 ActiveScreenTab.CASETA -> {
                     CasetaSecurityHub(
                         db = db,
@@ -381,240 +398,32 @@ fun SecurityScannerScreen() {
                         onSimulateScanInCaseta = { code ->
                             currentTab = ActiveScreenTab.SCANNER
                             verifyPassCode(code)
+                        },
+                        onOpenResidentDashboard = {
+                            currentTab = ActiveScreenTab.RESIDENT_DASHBOARD
                         }
                     )
                 }
 
                 ActiveScreenTab.SCANNER -> {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        // Interactive Operational Map for Emergencies and Geolocation
+                    Column(modifier = Modifier.fillMaxSize()) {
                         if (activePanicAlert != null) {
-                            item {
-                                OperationalEmergencyMapView(
-                                    db = db,
-                                    userRole = "GUARDIA",
-                                    onEmergencyResolvedOrClosed = {
-                                        activePanicAlert = null
-                                    }
-                                )
-                            }
-                        }
-
-                        // Live CameraX & ZXing Scanner Component
-                        item {
-                            Column {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "ESCÁNER EN TIEMPO REAL",
-                                        color = GoldPrimary,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.sp
-                                    )
-                                    Text(
-                                        text = "CameraX & Room DB",
-                                        color = CyanNeon,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                CameraScannerView(
-                                    onQrScanned = { scannedCode ->
-                                        verifyPassCode(scannedCode)
-                                    }
-                                )
-                            }
-                        }
-
-                        // Manual Code Lookup Input
-                        item {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = NavyCard),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(14.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = "BÚSQUEDA MANUAL DE CÓDIGO QR / FOLIO",
-                                        color = TextMuted,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        OutlinedTextField(
-                                            value = manualCodeInput,
-                                            onValueChange = { manualCodeInput = it },
-                                            placeholder = { Text("Ej: MED-20260821-1001", color = Color.Gray, fontSize = 13.sp) },
-                                            singleLine = true,
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedBorderColor = GoldPrimary,
-                                                unfocusedBorderColor = Color.Gray,
-                                                focusedTextColor = Color.White,
-                                                unfocusedTextColor = Color.White
-                                            ),
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .testTag("manual_code_input_field")
-                                        )
-
-                                        Button(
-                                            onClick = {
-                                                if (manualCodeInput.isNotBlank()) {
-                                                    verifyPassCode(manualCodeInput.trim())
-                                                } else {
-                                                    Toast.makeText(context, "Ingrese un código para verificar", Toast.LENGTH_SHORT).show()
-                                                }
-                                            },
-                                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = NavyDark),
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.testTag("verify_manual_code_button")
-                                        ) {
-                                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Verificar", fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Quick Scan Preset Bar from Room DB
-                        item {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    text = "PRUEBAS RÁPIDAS DE PASES ROOM (${roomPasses.size})",
-                                    color = TextMuted,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    items(roomPasses) { passRoom ->
-                                        val passEntity = passRoom.toQrPassEntity()
-                                        QuickPassChip(
-                                            pass = passEntity,
-                                            onClick = { verifyPassCode(passRoom.passCode) }
-                                        )
-                                    }
-                                    item {
-                                        QuickPassChip(
-                                            pass = QrPassEntity(
-                                                passCode = "CODIGO-INVALIDO-X",
-                                                guestName = "Desconocido",
-                                                guestDocument = "00.000.000-0",
-                                                destinationHouse = "Sin Destino",
-                                                hostResidentName = "N/A",
-                                                passType = com.example.scanner.PassType.VISITOR_SINGLE,
-                                                validUntilMillis = 0L
-                                            ),
-                                            isInvalidPreset = true,
-                                            onClick = { verifyPassCode("CODIGO-INVALIDO-X") }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // Recent Visitor Entries Summary Widget
-                        item {
-                            RecentVisitorEntriesList(
-                                entries = visitorEntries,
-                                onStatusChange = { entry, newStatus ->
-                                    val idLong = entry.id.toLongOrNull()
-                                    if (idLong != null) {
-                                        scope.launch {
-                                            if (newStatus == VisitorStatus.DEPARTED) {
-                                                repository.registerCheckOut(idLong, notes = "Salida confirmada en garita con 1 toque")
-                                                val duration = entry.durationStay ?: "Normal"
-                                                ResidentNotificationManager.notifyVisitorDeparted(
-                                                    context = context,
-                                                    guestName = entry.visitorName,
-                                                    destinationHouse = entry.destinationHouse,
-                                                    hostResidentName = entry.hostResidentName,
-                                                    durationStay = duration
-                                                )
-                                                SmartNotificationHub.notifyVisitorExit(
-                                                    context = context,
-                                                    db = db,
-                                                    guestName = entry.visitorName,
-                                                    unitId = entry.destinationHouse,
-                                                    hostResidentName = entry.hostResidentName,
-                                                    durationStay = duration,
-                                                    checkInFolio = entry.folio
-                                                )
-                                                db.auditLogDao().insertAuditLog(
-                                                    AuditLogEntity(
-                                                        folio = AlphaCoreEngine.generateUniqueFolio("AUD"),
-                                                        operatorName = "Guardia Garita 1",
-                                                        actionType = "CHECK_OUT_ONE_TOUCH",
-                                                        location = "Garita Principal",
-                                                        targetEntity = "${entry.visitorName} (${entry.folio})",
-                                                        changeDetails = "Salida táctica de 1 toque. Permanencia: $duration",
-                                                        resultStatus = "EXITOSO"
-                                                    )
-                                                )
-                                            } else {
-                                                repository.updateCheckInStatus(
-                                                    id = idLong,
-                                                    status = newStatus.name,
-                                                    notes = if (newStatus == VisitorStatus.VERIFIED) "Entrada verificada en Room DB" else "Entrada denegada en Room DB"
-                                                )
-                                            }
-                                        }
-                                        if (newStatus == VisitorStatus.VERIFIED) {
-                                            ResidentNotificationManager.notifyCustomVisitorEntry(
-                                                context = context,
-                                                guestName = entry.visitorName,
-                                                destinationHouse = entry.destinationHouse,
-                                                hostResidentName = entry.hostResidentName,
-                                                passTypeLabel = entry.passTypeLabel,
-                                                vehiclePlate = entry.vehiclePlate
-                                            )
-                                            scope.launch {
-                                                SmartNotificationHub.notifyVisitorEntry(
-                                                    context = context,
-                                                    db = db,
-                                                    guestName = entry.visitorName,
-                                                    unitId = entry.destinationHouse,
-                                                    hostResidentName = entry.hostResidentName,
-                                                    passTypeLabel = entry.passTypeLabel,
-                                                    vehiclePlate = entry.vehiclePlate,
-                                                    passFolio = entry.folio
-                                                )
-                                            }
-                                        }
-                                        val statusMsg = if (newStatus == VisitorStatus.VERIFIED) "Verificado y Notificado al Residente" else if (newStatus == VisitorStatus.DEPARTED) "Salida Registrada y Notificada al Residente" else "Denegado"
-                                        Toast.makeText(context, "Room DB: $statusMsg (${entry.visitorName})", Toast.LENGTH_SHORT).show()
-                                    }
+                            OperationalEmergencyMapView(
+                                db = db,
+                                userRole = "GUARDIA",
+                                onEmergencyResolvedOrClosed = {
+                                    activePanicAlert = null
                                 }
                             )
+                            Spacer(modifier = Modifier.height(8.dp))
                         }
 
-                        item {
-                            Spacer(modifier = Modifier.height(24.dp))
-                        }
+                        CameraXScannerScreen(
+                            db = db,
+                            onBackToDashboard = {
+                                currentTab = ActiveScreenTab.DASHBOARD
+                            }
+                        )
                     }
                 }
 

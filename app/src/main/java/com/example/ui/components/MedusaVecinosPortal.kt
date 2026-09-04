@@ -48,7 +48,8 @@ enum class PortalLoginMode(val label: String, val icon: String) {
 
 @Composable
 fun MedusaVecinosPortal(
-    onSimulateScanInCaseta: (String) -> Unit = {}
+    onSimulateScanInCaseta: (String) -> Unit = {},
+    onOpenResidentDashboard: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -308,6 +309,20 @@ fun MedusaVecinosPortal(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = onOpenResidentDashboard,
+                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = NavyDark),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("open_resident_dashboard_button")
+                        ) {
+                            Icon(Icons.Default.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Abrir Panel Seguro del Residente (Firestore)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -423,6 +438,82 @@ fun MedusaVecinosPortal(
                                             modifier = Modifier.padding(vertical = 8.dp)
                                         )
                                     }
+                                }
+                            }
+
+                            // Accesos rápidos de prueba
+                            Text("⚡ Iniciar con acceso rápido:", color = CyanNeon, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    onClick = {
+                                        selectedCondoId = "PARAISO"
+                                        inputCasa = "14"
+                                        inputCalle = ""
+                                        inputCodigo = "1234"
+                                        ejecutarLogin()
+                                    },
+                                    color = NavySurface,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.6f)),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        "🏠 Casa 14\n(Paraíso)",
+                                        color = GoldPrimary,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(6.dp)
+                                    )
+                                }
+
+                                Surface(
+                                    onClick = {
+                                        selectedCondoId = "PRADOS_1"
+                                        inputCasa = "26"
+                                        inputCalle = "Calle 2"
+                                        inputCodigo = "1234"
+                                        ejecutarLogin()
+                                    },
+                                    color = NavySurface,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.6f)),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        "🏡 Lote 26\n(Los Prados)",
+                                        color = CyanNeon,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(6.dp)
+                                    )
+                                }
+
+                                Surface(
+                                    onClick = {
+                                        selectedCondoId = "PRADOS_1"
+                                        inputCasa = "01"
+                                        inputCalle = "Calle 1"
+                                        inputCodigo = "1234"
+                                        ejecutarLogin()
+                                    },
+                                    color = NavySurface,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.6f)),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        "🏡 Lote 01\n(Calle 1)",
+                                        color = SuccessGreen,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(6.dp)
+                                    )
                                 }
                             }
 
