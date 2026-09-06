@@ -1220,7 +1220,7 @@ private fun InfoRow(
     }
 }
 
-private fun getAmenityIcon(amenityName: String): ImageVector {
+fun getAmenityIcon(amenityName: String): ImageVector {
     val lower = amenityName.lowercase()
     return when {
         lower.contains("pádel") || lower.contains("padel") || lower.contains("tenis") -> Icons.Default.SportsTennis

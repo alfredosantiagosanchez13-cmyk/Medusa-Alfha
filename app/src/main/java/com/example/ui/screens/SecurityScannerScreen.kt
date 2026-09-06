@@ -135,6 +135,7 @@ import com.example.ui.components.CasetaSecurityHub
 import com.example.ui.components.MedusaTacticalDashboardHub
 import com.example.ui.theme.TextMuted
 import com.example.utils.ResidentNotificationManager
+import com.example.data.fcm.FcmNotificationManager
 import kotlinx.coroutines.launch
 
 enum class ActiveScreenTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
@@ -644,24 +645,25 @@ fun SecurityScannerScreen() {
                                         android.util.Log.e("SecurityScannerScreen", "Error enqueuing sync: ${e.message}")
                                     }
 
-                                    // Send push notification automatically to the resident
-                                    ResidentNotificationManager.notifyResidentVisitorCheckedIn(
-                                        context = context,
-                                        pass = pass,
-                                        guardNotes = "Ingreso Verificado con Escáner CameraX en Garita Principal"
-                                    )
-                                    SmartNotificationHub.notifyVisitorEntry(
+                                    // Send real-time FCM notification automatically to the resident
+                                    FcmNotificationManager.sendVisitorQrScannedNotification(
                                         context = context,
                                         db = db,
-                                        guestName = pass.guestName,
+                                        condominiumId = selectedCondo.displayName,
                                         unitId = pass.destinationHouse,
                                         hostResidentName = pass.hostResidentName,
+                                        guestName = pass.guestName,
+                                        guestDocument = pass.guestDocument,
+                                        passFolio = unifiedFolio,
+                                        passCode = pass.passCode,
                                         passTypeLabel = pass.passType.label,
                                         vehiclePlate = pass.vehiclePlate,
-                                        passFolio = unifiedFolio
+                                        guardName = outcome.user.name,
+                                        gateLocation = "Garita Principal (${selectedCondo.shortTag})",
+                                        guardNotes = "Ingreso Verificado con Escáner CameraX por Seguridad"
                                     )
 
-                                    Toast.makeText(context, "✅ Ingreso Guardado en Room [$unifiedFolio] y Notificación Enviada", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "✅ Ingreso Guardado en Room [$unifiedFolio] y Push FCM Notificado", Toast.LENGTH_LONG).show()
                                 }
                                 is RbacValidationOutcome.Denied -> {
                                     Toast.makeText(context, "🚫 ${outcome.reason}", Toast.LENGTH_LONG).show()

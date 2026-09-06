@@ -79,10 +79,11 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.guava)
 
-    // Firebase (BOM, Auth, Firestore)
+    // Firebase (BOM, Auth, Firestore, Cloud Messaging)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
+    implementation(libs.firebase.messaging)
 
     // Google Sign-In with Credential Manager
     implementation(libs.androidx.credentials)

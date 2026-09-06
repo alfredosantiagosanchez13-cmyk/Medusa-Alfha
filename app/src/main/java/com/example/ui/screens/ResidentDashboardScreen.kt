@@ -27,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -38,16 +39,23 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.auth.AlfhaRole
 import com.example.auth.AlfhaSecurityContext
 import com.example.data.auth.AlfhaUserEntity
 import com.example.data.booking.AmenityBooking
 import com.example.data.booking.AmenityBookingEngine
+import com.example.data.booking.AmenityCatalogItem
 import com.example.data.booking.AppDatabase
+import com.example.data.booking.TimeSlotAvailability
 import com.example.data.passes.QrPassRoomEntity
 import com.example.data.resident.ResidentDashboardRepository
 import com.example.data.resident.ResidentDashboardState
+import com.example.data.fcm.FcmNotificationManager
+import com.example.data.fcm.VisitorCheckInFcmPayload
 import com.example.scanner.PassType
+import com.example.ui.components.AmenityCalendarView
+import com.example.ui.components.getAmenityIcon
 import com.example.ui.theme.*
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
@@ -81,6 +89,7 @@ fun ResidentDashboardScreen(
     // Estado del Dashboard
     var state by remember { mutableStateOf(ResidentDashboardState(isLoading = true)) }
     var currentFilter by remember { mutableStateOf(DashboardFilterTab.ALL) }
+    var amenityViewMode by remember { mutableStateOf(0) } // 0: Calendario Visual, 1: Mis Reservas
     var showNewQrDialog by remember { mutableStateOf(false) }
     var showNewBookingDialog by remember { mutableStateOf(false) }
     var selectedQrPassForDetail by remember { mutableStateOf<QrPassRoomEntity?>(null) }
@@ -92,6 +101,13 @@ fun ResidentDashboardScreen(
 
     // Condominio activo para la consulta aislada
     val condominiumId = "PRADOS_1"
+
+    // Estado reactivo de Firebase Cloud Messaging (FCM)
+    val fcmToken by FcmNotificationManager.fcmToken.collectAsState()
+    val fcmStatus by FcmNotificationManager.fcmStatusMessage.collectAsState()
+    val isSubscribedToUnit by FcmNotificationManager.isSubscribedToUnit.collectAsState()
+    val lastFcmPayload by FcmNotificationManager.lastReceivedNotification.collectAsState()
+    var dismissedBannerFolio by remember { mutableStateOf<String?>(null) }
 
     // Carga de datos aislados
     fun refreshData(overrideUid: String? = customFirebaseUid, overrideEmail: String? = customFirebaseEmail) {
@@ -113,6 +129,18 @@ fun ResidentDashboardScreen(
 
     LaunchedEffect(currentUser.id, currentUser.unitOrDepartment, customFirebaseUid) {
         refreshData(customFirebaseUid, customFirebaseEmail)
+        FcmNotificationManager.initialize(
+            context = context,
+            currentUser = currentUser,
+            condominiumId = condominiumId
+        )
+    }
+
+    // Actualización automática instantánea cuando ingresa una visita vía FCM
+    LaunchedEffect(lastFcmPayload) {
+        if (lastFcmPayload != null && (lastFcmPayload?.targetUnitId == currentUser.unitOrDepartment || currentUser.unitOrDepartment.isNullOrBlank())) {
+            refreshData(customFirebaseUid, customFirebaseEmail)
+        }
     }
 
     Scaffold(
@@ -195,14 +223,47 @@ fun ResidentDashboardScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
             contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp)
         ) {
+            // 0. Banner de Notificación Push FCM en Tiempo Real si hay evento reciente
+            if (lastFcmPayload != null && dismissedBannerFolio != lastFcmPayload?.passFolio) {
+                item {
+                    RealtimeFcmAlertBanner(
+                        payload = lastFcmPayload!!,
+                        onDismiss = { dismissedBannerFolio = lastFcmPayload?.passFolio }
+                    )
+                }
+            }
+
             // 1. Tarjeta de Identidad y Aislamiento del Residente
             item {
                 ResidentIdentityCard(
                     user = currentUser,
                     condominiumId = condominiumId,
                     state = state,
+                    fcmStatus = fcmStatus,
+                    isSubscribedToUnit = isSubscribedToUnit,
+                    fcmToken = fcmToken,
                     onSwitchUserClick = { showUserSwitcherDialog = true },
-                    onAuditClick = { showAuditDetailsDialog = true }
+                    onAuditClick = { showAuditDetailsDialog = true },
+                    onTestFcmClick = {
+                        scope.launch {
+                            FcmNotificationManager.sendVisitorQrScannedNotification(
+                                context = context,
+                                db = db,
+                                condominiumId = condominiumId,
+                                unitId = currentUser.unitOrDepartment.ifBlank { "Casa 102" },
+                                hostResidentName = currentUser.name,
+                                guestName = "Carlos Mendoza (Prueba Push)",
+                                guestDocument = "18.345.987-2",
+                                passFolio = "FCM-TEST-${(1000..9999).random()}",
+                                passCode = "QR-${(1000..9999).random()}",
+                                passTypeLabel = "Visita General",
+                                vehiclePlate = "HZ-WP-99",
+                                guardName = "Oficial Soto (Garita)",
+                                gateLocation = "Garita Principal de Seguridad",
+                                guardNotes = "Prueba de escaneo exitoso QR y notificación Push FCM al residente"
+                            )
+                        }
+                    }
                 )
             }
 
@@ -366,7 +427,7 @@ fun ResidentDashboardScreen(
                 item {
                     Spacer(modifier = Modifier.height(6.dp))
                     SectionHeader(
-                        title = "Próximas Reservas de Amenidades",
+                        title = if (currentFilter == DashboardFilterTab.AMENITIES) "Disponibilidad y Reservas de Amenidades" else "Próximas Reservas de Amenidades",
                         subtitle = "Áreas comunes en Los Prados • Aislamiento por unidad",
                         count = state.upcomingBookings.size,
                         badgeColor = SuccessGreen,
@@ -375,22 +436,159 @@ fun ResidentDashboardScreen(
                     )
                 }
 
-                if (state.upcomingBookings.isEmpty()) {
+                if (currentFilter == DashboardFilterTab.AMENITIES) {
                     item {
-                        EmptyStateCard(
-                            icon = Icons.Default.EventAvailable,
-                            title = "Sin reservas próximas de amenidades",
-                            description = "Puedes apartar la alberca, canchas de pádel o el quincho para eventos familiares.",
-                            buttonText = "Explorar y Reservar Amenidad",
-                            onClick = { showNewBookingDialog = true }
-                        )
+                        // Selector de Modo de Vista para Amenidades
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = amenityViewMode == 0,
+                                onClick = { amenityViewMode = 0 },
+                                leadingIcon = {
+                                    Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text("Calendario de Disponibilidad", fontSize = 12.sp, fontWeight = if (amenityViewMode == 0) FontWeight.Bold else FontWeight.Normal) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = GoldPrimary,
+                                    selectedLabelColor = NavyDark,
+                                    selectedLeadingIconColor = NavyDark,
+                                    containerColor = NavySurface,
+                                    labelColor = TextWhite
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = amenityViewMode == 1,
+                                onClick = { amenityViewMode = 1 },
+                                leadingIcon = {
+                                    Icon(Icons.Default.EventAvailable, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text("Mis Reservas (${state.upcomingBookings.size})", fontSize = 12.sp, fontWeight = if (amenityViewMode == 1) FontWeight.Bold else FontWeight.Normal) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = SuccessGreen,
+                                    selectedLabelColor = NavyDark,
+                                    selectedLeadingIconColor = NavyDark,
+                                    containerColor = NavySurface,
+                                    labelColor = TextWhite
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    if (amenityViewMode == 0) {
+                        item {
+                            AmenityCalendarView(
+                                db = db,
+                                initialCondominiumId = condominiumId,
+                                filterUnitId = currentUser.unitOrDepartment,
+                                onShowQrPass = { booking ->
+                                    Toast.makeText(context, "Reserva: ${booking.folio} • ${booking.amenityName}", Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                    } else {
+                        if (state.upcomingBookings.isEmpty()) {
+                            item {
+                                EmptyStateCard(
+                                    icon = Icons.Default.EventAvailable,
+                                    title = "Sin reservas próximas de amenidades",
+                                    description = "Puedes apartar la alberca, canchas de pádel o el quincho para eventos familiares.",
+                                    buttonText = "Explorar Calendario y Reservar",
+                                    onClick = { showNewBookingDialog = true }
+                                )
+                            }
+                        } else {
+                            items(state.upcomingBookings, key = { it.folio }) { booking ->
+                                UpcomingBookingCard(
+                                    booking = booking,
+                                    onCancelClick = { bookingToCancel = booking }
+                                )
+                            }
+                        }
                     }
                 } else {
-                    items(state.upcomingBookings, key = { it.folio }) { booking ->
-                        UpcomingBookingCard(
-                            booking = booking,
-                            onCancelClick = { bookingToCancel = booking }
-                        )
+                    // Vista consolidada (DashboardFilterTab.ALL)
+                    item {
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    currentFilter = DashboardFilterTab.AMENITIES
+                                    amenityViewMode = 0
+                                },
+                            shape = RoundedCornerShape(16.dp),
+                            color = NavyCard,
+                            border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.5f))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .background(GoldPrimary.copy(alpha = 0.15f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(22.dp))
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text(
+                                            text = "CALENDARIO VISUAL DE ÁREAS COMUNES",
+                                            color = GoldPrimary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                        Text(
+                                            text = "Consulta fechas y horarios libres para Quincho, Pádel, Piscina y Gym",
+                                            color = TextMuted,
+                                            fontSize = 11.sp,
+                                            maxLines = 2
+                                        )
+                                    }
+                                }
+                                Button(
+                                    onClick = {
+                                        showNewBookingDialog = true
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = NavyDark),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text("+ Reservar", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    if (state.upcomingBookings.isEmpty()) {
+                        item {
+                            EmptyStateCard(
+                                icon = Icons.Default.EventAvailable,
+                                title = "Sin reservas próximas de amenidades",
+                                description = "Puedes apartar la alberca, canchas de pádel o el quincho para eventos familiares.",
+                                buttonText = "Explorar y Reservar Amenidad",
+                                onClick = { showNewBookingDialog = true }
+                            )
+                        }
+                    } else {
+                        items(state.upcomingBookings, key = { it.folio }) { booking ->
+                            UpcomingBookingCard(
+                                booking = booking,
+                                onCancelClick = { bookingToCancel = booking }
+                            )
+                        }
                     }
                 }
             }
@@ -514,8 +712,12 @@ private fun ResidentIdentityCard(
     user: AlfhaUserEntity,
     condominiumId: String,
     state: ResidentDashboardState,
+    fcmStatus: String = "FCM Conectado",
+    isSubscribedToUnit: Boolean = true,
+    fcmToken: String? = null,
     onSwitchUserClick: () -> Unit,
-    onAuditClick: () -> Unit
+    onAuditClick: () -> Unit,
+    onTestFcmClick: () -> Unit = {}
 ) {
     var showQueryInspector by remember { mutableStateOf(false) }
 
@@ -650,6 +852,108 @@ private fun ResidentIdentityCard(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+            }
+
+            // Firebase Cloud Messaging (FCM) - Notificaciones Push en Tiempo Real
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = NavyDark,
+                border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.35f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("resident_fcm_status_surface")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.NotificationsActive,
+                                contentDescription = "FCM Status",
+                                tint = CyanNeon,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "FCM Push • Tiempo Real",
+                                        color = CyanNeon,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = SuccessGreen.copy(alpha = 0.2f),
+                                        border = BorderStroke(0.5.dp, SuccessGreen)
+                                    ) {
+                                        Text(
+                                            text = if (isSubscribedToUnit) "ENLAZADO" else "ACTIVO",
+                                            color = SuccessGreen,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "Tópico: unit_${condominiumId.lowercase()}_${user.unitOrDepartment.lowercase().replace(" ", "_")}",
+                                    color = TextMuted,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        // Botón para probar alerta push
+                        OutlinedButton(
+                            onClick = onTestFcmClick,
+                            shape = RoundedCornerShape(6.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldPrimary),
+                            border = BorderStroke(0.8.dp, GoldPrimary.copy(alpha = 0.6f)),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("btn_test_fcm_notification")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = GoldPrimary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Probar Push",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    if (!fcmToken.isNullOrBlank()) {
+                        Text(
+                            text = "Token: ${fcmToken.take(28)}...${fcmToken.takeLast(8)}",
+                            color = TextMuted.copy(alpha = 0.7f),
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -819,6 +1123,171 @@ private fun ResidentIdentityCard(
                         fontSize = 10.sp,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Banner de Alerta en Tiempo Real cuando personal de seguridad en caseta
+ * escanea el código QR de una visita con éxito.
+ */
+@Composable
+fun RealtimeFcmAlertBanner(
+    payload: VisitorCheckInFcmPayload,
+    onDismiss: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("realtime_fcm_alert_banner"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = NavySurface),
+        border = BorderStroke(1.5.dp, SuccessGreen)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            SuccessGreen.copy(alpha = 0.22f),
+                            NavySurface
+                        )
+                    )
+                )
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(SuccessGreen.copy(alpha = 0.25f))
+                            .border(1.dp, SuccessGreen, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.NotificationsActive,
+                            contentDescription = "Push Notification",
+                            tint = SuccessGreen,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = "🔔 ¡VISITA INGRESADA! (FCM)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = SuccessGreen,
+                            fontWeight = FontWeight.Bold
+                        )
+                        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(payload.scanTimestamp))
+                        Text(
+                            text = "Notificación Push en Tiempo Real • $timeStr hrs",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .testTag("dismiss_fcm_banner")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Cerrar",
+                        tint = TextMuted,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = NavyDark,
+                border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.25f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Visita: ${payload.guestName}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextWhite,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = CyanNeon.copy(alpha = 0.15f),
+                            border = BorderStroke(0.5.dp, CyanNeon)
+                        ) {
+                            Text(
+                                text = payload.passTypeLabel,
+                                color = CyanNeon,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Destino: ${payload.targetUnitId}",
+                            color = GoldPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (!payload.vehiclePlate.isNullOrBlank()) {
+                            Text(
+                                text = "Patente: ${payload.vehiclePlate}",
+                                color = TextWhite,
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "👮 ${payload.gateLocation} • ${payload.guardName}",
+                        color = TextMuted,
+                        fontSize = 11.sp
+                    )
+
+                    if (payload.guardNotes.isNotBlank()) {
+                        Text(
+                            text = "💬 ${payload.guardNotes}",
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -2240,7 +2709,8 @@ private fun CreateQrPassDialog(
 }
 
 /**
- * Diálogo para apartar una amenidad de Los Prados Residencial.
+ * Diálogo Interactivo con Calendario Visual para apartar áreas comunes en Los Prados.
+ * Muestra fechas y horarios disponibles en tiempo real con aislamiento Firestore por unidad.
  */
 @Composable
 private fun CreateAmenityBookingDialog(
@@ -2251,53 +2721,117 @@ private fun CreateAmenityBookingDialog(
     onDismiss: () -> Unit,
     onBookingCreated: () -> Unit
 ) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val catalog = remember { AmenityBookingEngine.CATALOG }
-    var selectedAmenity by remember { mutableStateOf(catalog.firstOrNull()?.name ?: "Quincho & BBQ Principal") }
-    var selectedSlot by remember { mutableStateOf("16:00 - 18:00") }
+    var selectedAmenity by remember { mutableStateOf(catalog.first()) }
+
+    // Calendario de navegación del mes
+    var displayMonthCalendar by remember {
+        mutableStateOf(Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        })
+    }
+
+    // Fecha seleccionada (por defecto hoy, o mañana si ya es tarde)
+    var selectedDateCalendar by remember {
+        mutableStateOf(Calendar.getInstance().apply {
+            if (get(Calendar.HOUR_OF_DAY) >= 20) {
+                add(Calendar.DAY_OF_YEAR, 1)
+            }
+        })
+    }
+
+    val allCondoBookings by db.amenityBookingDao().getBookingsByCondominium(condominiumId).collectAsState(initial = emptyList())
+
+    var calculatedSlots by remember { mutableStateOf<List<TimeSlotAvailability>>(emptyList()) }
+    var selectedSlot by remember { mutableStateOf<TimeSlotAvailability?>(null) }
+    var isLoadingSlots by remember { mutableStateOf(false) }
     var notes by remember { mutableStateOf("") }
     var isSubmitting by remember { mutableStateOf(false) }
 
-    val cal = remember {
-        val c = Calendar.getInstance()
-        c.add(Calendar.DAY_OF_YEAR, 1)
-        c.set(Calendar.HOUR_OF_DAY, 16)
-        c.set(Calendar.MINUTE, 0)
-        c
+    val monthTitleFormatter = remember { SimpleDateFormat("MMMM yyyy", Locale("es", "ES")) }
+    val selectedDateHeaderFormatter = remember { SimpleDateFormat("EEEE, d 'de' MMMM", Locale("es", "ES")) }
+    val summaryDateFormatter = remember { SimpleDateFormat("dd/MM/yyyy", Locale("es", "ES")) }
+
+    // Calcular disponibilidad en vivo cuando cambia el área común o la fecha seleccionada
+    LaunchedEffect(selectedAmenity.name, selectedDateCalendar.timeInMillis, allCondoBookings.size) {
+        isLoadingSlots = true
+        val slots = AmenityBookingEngine.getDailyAvailability(
+            db = db,
+            amenityName = selectedAmenity.name,
+            targetDateCalendar = selectedDateCalendar,
+            condominiumId = condominiumId
+        )
+        calculatedSlots = slots
+        // Auto-seleccionar primer horario disponible si el actual no existe o no está libre
+        if (selectedSlot == null || slots.none { it.slotLabel == selectedSlot?.slotLabel && it.isAvailable }) {
+            selectedSlot = slots.firstOrNull { it.isAvailable }
+        }
+        isLoadingSlots = false
     }
 
-    Dialog(onDismissRequest = onDismiss) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Surface(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp)
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.92f)
+                .padding(vertical = 12.dp)
                 .testTag("create_booking_dialog"),
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(22.dp),
             color = NavySurface,
-            border = BorderStroke(1.dp, SuccessGreen)
+            border = BorderStroke(1.5.dp, SuccessGreen)
         ) {
             Column(
                 modifier = Modifier
-                    .padding(20.dp)
-                    .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // Barra superior de encabezado
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Reservar Amenidad",
-                        color = SuccessGreen,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(SuccessGreen.copy(alpha = 0.2f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "CALENDARIO DE RESERVAS",
+                                color = SuccessGreen,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                text = "Disponibilidad de áreas comunes en tiempo real",
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = TextMuted)
                     }
                 }
 
+                // Insignia de aislamiento de condominio y unidad
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = NavyDark,
@@ -2305,67 +2839,476 @@ private fun CreateAmenityBookingDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(Icons.Default.Lock, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(14.dp))
-                        Text(
-                            text = "Aislado para: ${user.unitOrDepartment} • Auth UID: $firebaseUid",
-                            color = CyanNeon,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Lock, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Unidad: ${user.unitOrDepartment} • Los Prados ($condominiumId)",
+                                color = CyanNeon,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp
+                            )
+                        }
+                        Surface(
+                            color = SuccessGreen.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "FIRESTORE SYNC",
+                                color = SuccessGreen,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
 
-                // Selector de Amenidad
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                // 1. Selector de Amenidad
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "1. SELECCIONA EL ÁREA COMÚN:",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(catalog) { item ->
+                            val isSelected = selectedAmenity.name == item.name
+                            Surface(
+                                onClick = { selectedAmenity = item },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) SuccessGreen else NavyCard,
+                                border = BorderStroke(1.dp, if (isSelected) SuccessGreen else Color.White.copy(alpha = 0.1f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = getAmenityIcon(item.name),
+                                        contentDescription = null,
+                                        tint = if (isSelected) NavyDark else GoldPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = item.name,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) NavyDark else Color.White
+                                        )
+                                        Text(
+                                            text = "Aforo ${item.capacity}p • Máx ${item.maxHoursPerBooking}h",
+                                            fontSize = 9.sp,
+                                            color = if (isSelected) NavyDark.copy(alpha = 0.8f) else TextMuted
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. Calendario Visual Mensual
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = NavyCard,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(catalog) { item ->
-                        val isSelected = selectedAmenity == item.name
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { selectedAmenity = item.name },
-                            label = { Text(item.name, fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = SuccessGreen,
-                                selectedLabelColor = NavyDark,
-                                containerColor = NavyCard,
-                                labelColor = TextWhite
-                            )
-                        )
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Navegación de Mes
+                        val nowCal = remember { Calendar.getInstance() }
+                        val isAtOrBeforeCurrentMonth = displayMonthCalendar.get(Calendar.YEAR) == nowCal.get(Calendar.YEAR) &&
+                                displayMonthCalendar.get(Calendar.MONTH) <= nowCal.get(Calendar.MONTH)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (!isAtOrBeforeCurrentMonth) {
+                                        val prev = displayMonthCalendar.clone() as Calendar
+                                        prev.add(Calendar.MONTH, -1)
+                                        displayMonthCalendar = prev
+                                    }
+                                },
+                                enabled = !isAtOrBeforeCurrentMonth
+                            ) {
+                                Icon(
+                                    Icons.Default.ChevronLeft,
+                                    contentDescription = "Mes anterior",
+                                    tint = if (!isAtOrBeforeCurrentMonth) Color.White else TextMuted.copy(alpha = 0.3f)
+                                )
+                            }
+
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = monthTitleFormatter.format(displayMonthCalendar.time).uppercase(),
+                                    color = GoldPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Text(
+                                    text = "Toca un día para ver disponibilidad",
+                                    color = TextMuted,
+                                    fontSize = 9.sp
+                                )
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(
+                                    onClick = {
+                                        displayMonthCalendar = Calendar.getInstance().apply {
+                                            set(Calendar.DAY_OF_MONTH, 1)
+                                        }
+                                        selectedDateCalendar = Calendar.getInstance()
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Hoy", color = CyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val next = displayMonthCalendar.clone() as Calendar
+                                        next.add(Calendar.MONTH, 1)
+                                        displayMonthCalendar = next
+                                    }
+                                ) {
+                                    Icon(Icons.Default.ChevronRight, contentDescription = "Mes siguiente", tint = Color.White)
+                                }
+                            }
+                        }
+
+                        // Encabezado de Días de la Semana
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            listOf("LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM").forEach { dayName ->
+                                Text(
+                                    text = dayName,
+                                    color = TextMuted,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+
+                        // Cuadrícula de 7 columnas
+                        val daysInMonth = displayMonthCalendar.getActualMaximum(Calendar.DAY_OF_MONTH)
+                        val tempFirstDayCal = (displayMonthCalendar.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
+                        val startDayOfWeek = (tempFirstDayCal.get(Calendar.DAY_OF_WEEK) - Calendar.MONDAY + 7) % 7
+
+                        val isCurrentMonth = nowCal.get(Calendar.YEAR) == displayMonthCalendar.get(Calendar.YEAR) &&
+                                nowCal.get(Calendar.MONTH) == displayMonthCalendar.get(Calendar.MONTH)
+                        val todayDay = nowCal.get(Calendar.DAY_OF_MONTH)
+
+                        val isSelectedMonth = selectedDateCalendar.get(Calendar.YEAR) == displayMonthCalendar.get(Calendar.YEAR) &&
+                                selectedDateCalendar.get(Calendar.MONTH) == displayMonthCalendar.get(Calendar.MONTH)
+                        val selectedDay = selectedDateCalendar.get(Calendar.DAY_OF_MONTH)
+
+                        val totalCells = startDayOfWeek + daysInMonth
+                        val numRows = (totalCells + 6) / 7
+
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            for (row in 0 until numRows) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    for (col in 0 until 7) {
+                                        val cellIndex = row * 7 + col
+                                        val dayNumber = cellIndex - startDayOfWeek + 1
+
+                                        if (dayNumber in 1..daysInMonth) {
+                                            val isPast = (isCurrentMonth && dayNumber < todayDay) ||
+                                                    (displayMonthCalendar.get(Calendar.YEAR) < nowCal.get(Calendar.YEAR) ||
+                                                            (displayMonthCalendar.get(Calendar.YEAR) == nowCal.get(Calendar.YEAR) && displayMonthCalendar.get(Calendar.MONTH) < nowCal.get(Calendar.MONTH)))
+                                            val isToday = isCurrentMonth && dayNumber == todayDay
+                                            val isSelected = isSelectedMonth && dayNumber == selectedDay
+
+                                            // Comprobar si hay reservas para esta amenidad en este día
+                                            val dayCal = (displayMonthCalendar.clone() as Calendar).apply {
+                                                set(Calendar.DAY_OF_MONTH, dayNumber)
+                                            }
+                                            val dayBookingsCount = allCondoBookings.count { b ->
+                                                val bCal = Calendar.getInstance().apply { timeInMillis = b.bookingTimeMillis }
+                                                b.amenityName == selectedAmenity.name &&
+                                                        bCal.get(Calendar.YEAR) == dayCal.get(Calendar.YEAR) &&
+                                                        bCal.get(Calendar.DAY_OF_YEAR) == dayCal.get(Calendar.DAY_OF_YEAR)
+                                            }
+
+                                            Surface(
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .aspectRatio(1f)
+                                                    .padding(2.dp)
+                                                    .clickable(enabled = !isPast) {
+                                                        selectedDateCalendar = (dayCal.clone() as Calendar)
+                                                    },
+                                                shape = RoundedCornerShape(8.dp),
+                                                color = when {
+                                                    isSelected -> SuccessGreen
+                                                    isPast -> Color.Transparent
+                                                    else -> NavyDark.copy(alpha = 0.8f)
+                                                },
+                                                border = when {
+                                                    isSelected -> BorderStroke(1.5.dp, SuccessGreen)
+                                                    isToday -> BorderStroke(1.dp, GoldPrimary)
+                                                    else -> BorderStroke(0.5.dp, Color.White.copy(alpha = 0.05f))
+                                                }
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    verticalArrangement = Arrangement.Center,
+                                                    horizontalAlignment = Alignment.CenterHorizontally
+                                                ) {
+                                                    Text(
+                                                        text = "$dayNumber",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = if (isSelected || isToday) FontWeight.Black else FontWeight.Medium,
+                                                        color = when {
+                                                            isSelected -> NavyDark
+                                                            isPast -> TextMuted.copy(alpha = 0.35f)
+                                                            isToday -> GoldPrimary
+                                                            else -> Color.White
+                                                        }
+                                                    )
+                                                    if (!isPast) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(4.dp)
+                                                                .background(
+                                                                    if (isSelected) NavyDark else if (dayBookingsCount > 0) GoldPrimary else SuccessGreen.copy(alpha = 0.5f),
+                                                                    CircleShape
+                                                                )
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            Spacer(modifier = Modifier.weight(1f).aspectRatio(1f).padding(2.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Accesos rápidos de fechas
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(
+                                0 to "Hoy",
+                                1 to "Mañana",
+                                2 to "+2 días",
+                                3 to "+3 días"
+                            ).forEach { (dayOffset, label) ->
+                                val targetCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, dayOffset) }
+                                val isSame = selectedDateCalendar.get(Calendar.DAY_OF_YEAR) == targetCal.get(Calendar.DAY_OF_YEAR) &&
+                                        selectedDateCalendar.get(Calendar.YEAR) == targetCal.get(Calendar.YEAR)
+                                Surface(
+                                    onClick = {
+                                        selectedDateCalendar = targetCal
+                                        displayMonthCalendar = (targetCal.clone() as Calendar).apply { set(Calendar.DAY_OF_MONTH, 1) }
+                                    },
+                                    color = if (isSame) CyanNeon.copy(alpha = 0.2f) else NavyDark,
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(1.dp, if (isSame) CyanNeon else Color.White.copy(alpha = 0.08f)),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (isSame) CyanNeon else TextWhite,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (isSame) FontWeight.Bold else FontWeight.Normal,
+                                        modifier = Modifier.padding(vertical = 5.dp),
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
-                // Selector de Horario
-                val slots = listOf("10:00 - 12:00", "14:00 - 16:00", "16:00 - 18:00", "18:00 - 20:00", "20:00 - 22:00")
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(slots) { slot ->
-                        val isSelected = selectedSlot == slot
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { selectedSlot = slot },
-                            label = { Text(slot, fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = CyanNeon,
-                                selectedLabelColor = NavyDark,
-                                containerColor = NavyCard,
-                                labelColor = TextWhite
+                // 3. Selector de Horarios Disponibles para la fecha seleccionada
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "3. HORARIOS DISPONIBLES:",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
                             )
-                        )
+                            Text(
+                                text = selectedDateHeaderFormatter.format(selectedDateCalendar.time).replaceFirstChar { it.uppercase() },
+                                color = CyanNeon,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+
+                        Surface(
+                            color = SuccessGreen.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "${calculatedSlots.count { it.isAvailable }} de ${calculatedSlots.size} libres",
+                                color = SuccessGreen,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    if (isLoadingSlots) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = SuccessGreen, strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Calculando disponibilidad en Firestore...", color = TextMuted, fontSize = 11.sp)
+                        }
+                    } else if (calculatedSlots.isEmpty()) {
+                        Surface(
+                            color = NavyDark,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "No hay horarios configurados para esta fecha.",
+                                color = TextMuted,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(12.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    } else {
+                        // Lista de turnos en cuadrícula de 2 columnas
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            calculatedSlots.chunked(2).forEach { rowSlots ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    rowSlots.forEach { slot ->
+                                        val isSelected = selectedSlot?.slotLabel == slot.slotLabel
+                                        Surface(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable(enabled = slot.isAvailable) {
+                                                    selectedSlot = slot
+                                                },
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = when {
+                                                isSelected -> SuccessGreen.copy(alpha = 0.2f)
+                                                slot.isAvailable -> NavyCard
+                                                else -> NavyDark.copy(alpha = 0.5f)
+                                            },
+                                            border = BorderStroke(
+                                                1.dp,
+                                                when {
+                                                    isSelected -> SuccessGreen
+                                                    slot.isAvailable -> Color.White.copy(alpha = 0.1f)
+                                                    else -> ErrorRed.copy(alpha = 0.3f)
+                                                }
+                                            )
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = slot.slotLabel,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = if (isSelected) SuccessGreen else if (slot.isAvailable) Color.White else TextMuted
+                                                    )
+                                                    Text(
+                                                        text = if (slot.isAvailable) "2 hrs duración" else "Ocupado por ${slot.bookedByUnit}",
+                                                        fontSize = 9.sp,
+                                                        color = if (slot.isAvailable) TextMuted else ErrorRed
+                                                    )
+                                                }
+
+                                                if (slot.isAvailable) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(18.dp)
+                                                            .background(
+                                                                if (isSelected) SuccessGreen else Color.Transparent,
+                                                                CircleShape
+                                                            )
+                                                            .border(1.dp, if (isSelected) SuccessGreen else Color.White.copy(alpha = 0.3f), CircleShape),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        if (isSelected) {
+                                                            Icon(Icons.Default.Check, contentDescription = null, tint = NavyDark, modifier = Modifier.size(12.dp))
+                                                        }
+                                                    }
+                                                } else {
+                                                    Surface(
+                                                        color = ErrorRed.copy(alpha = 0.15f),
+                                                        shape = RoundedCornerShape(4.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "OCUPADO",
+                                                            color = ErrorRed,
+                                                            fontSize = 8.sp,
+                                                            fontWeight = FontWeight.Black,
+                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (rowSlots.size == 1) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
+                // 4. Motivo / Notas opcionales
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
-                    label = { Text("Nota / Motivo (ej. Cumpleaños familiar)") },
+                    label = { Text("Nota / Motivo del evento (opcional, ej. Cumpleaños familiar)") },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = TextWhite,
@@ -2376,35 +3319,100 @@ private fun CreateAmenityBookingDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                // 5. Resumen de la reserva
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = NavyDark,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("RESUMEN DE RESERVA:", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.Black)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Área:", color = TextMuted, fontSize = 11.sp)
+                            Text("${selectedAmenity.name} (${selectedAmenity.capacity} pers)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Fecha:", color = TextMuted, fontSize = 11.sp)
+                            Text(summaryDateFormatter.format(selectedDateCalendar.time), color = CyanNeon, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Horario:", color = TextMuted, fontSize = 11.sp)
+                            Text(selectedSlot?.slotLabel ?: "Ninguno seleccionado", color = SuccessGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Titular / Unidad:", color = TextMuted, fontSize = 11.sp)
+                            Text("${user.name} • ${user.unitOrDepartment}", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
 
+                // Botón de Confirmación
                 Button(
                     onClick = {
+                        val slot = selectedSlot ?: return@Button
                         isSubmitting = true
+
+                        val bookingCal = (selectedDateCalendar.clone() as Calendar).apply {
+                            val slotCal = Calendar.getInstance().apply { timeInMillis = slot.startMillis }
+                            set(Calendar.HOUR_OF_DAY, slotCal.get(Calendar.HOUR_OF_DAY))
+                            set(Calendar.MINUTE, slotCal.get(Calendar.MINUTE))
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+
                         scope.launch {
                             ResidentDashboardRepository.createResidentAmenityBooking(
                                 db = db,
                                 condominiumId = condominiumId,
                                 user = user,
-                                amenityName = selectedAmenity,
-                                bookingDateCalendar = cal,
-                                timeSlot = selectedSlot,
-                                notes = notes,
+                                amenityName = selectedAmenity.name,
+                                bookingDateCalendar = bookingCal,
+                                timeSlot = slot.slotLabel,
+                                notes = notes.ifBlank { "Reserva desde Calendario Visual" },
                                 firebaseUid = firebaseUid
                             )
                             isSubmitting = false
+                            Toast.makeText(context, "✅ Reserva confirmada: ${selectedAmenity.name} (${slot.slotLabel})", Toast.LENGTH_LONG).show()
                             onBookingCreated()
+                            onDismiss()
                         }
                     },
-                    enabled = !isSubmitting,
+                    enabled = !isSubmitting && selectedSlot != null,
                     colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = NavyDark),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("btn_submit_create_booking")
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("btn_submit_create_booking")
                 ) {
                     if (isSubmitting) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), color = NavyDark, strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = NavyDark, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Sincronizando con Firestore...", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     } else {
-                        Text("Confirmar Reserva en Firestore", fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.EventAvailable, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (selectedSlot != null) "Confirmar Reserva [${selectedSlot?.slotLabel}]" else "Selecciona un Horario Libre",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 13.sp
+                        )
                     }
                 }
             }

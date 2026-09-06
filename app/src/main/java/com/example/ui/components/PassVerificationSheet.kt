@@ -208,12 +208,31 @@ fun PassVerificationSheet(
                                 .format(Date(pass.validUntilMillis))
                         )
 
+                        if (!result.hostResidentPhone.isNullOrBlank()) {
+                            DetailRow(
+                                icon = Icons.Default.Phone,
+                                label = "Teléfono Anfitrión",
+                                value = result.hostResidentPhone,
+                                subValue = "Tocar para llamar a residencia",
+                                highlight = true
+                            )
+                        }
+
                         if (!pass.note.isNullOrEmpty()) {
                             Text(
                                 text = "Nota: ${pass.note}",
                                 color = CyanNeon,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Normal
+                            )
+                        }
+
+                        if (result.isFirestoreValidated) {
+                            Text(
+                                text = "☁️ Validado en tiempo real en la nube Firestore",
+                                color = CyanNeon,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }

@@ -1187,15 +1187,3 @@ private fun InfoRow(
         Text(value, color = valueColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
-
-private fun getAmenityIcon(amenityName: String): ImageVector {
-    return when {
-        amenityName.contains("Quincho", ignoreCase = true) || amenityName.contains("BBQ", ignoreCase = true) -> Icons.Default.SportsGolf
-        amenityName.contains("Pádel", ignoreCase = true) || amenityName.contains("Tenis", ignoreCase = true) -> Icons.Default.SportsTennis
-        amenityName.contains("Gimnasio", ignoreCase = true) || amenityName.contains("Gym", ignoreCase = true) -> Icons.Default.FitnessCenter
-        amenityName.contains("Piscina", ignoreCase = true) || amenityName.contains("Pool", ignoreCase = true) -> Icons.Default.Pool
-        amenityName.contains("Cowork", ignoreCase = true) || amenityName.contains("Business", ignoreCase = true) -> Icons.Default.Work
-        amenityName.contains("Eventos", ignoreCase = true) || amenityName.contains("Multiuso", ignoreCase = true) -> Icons.Default.Group
-        else -> Icons.Default.EventAvailable
-    }
-}

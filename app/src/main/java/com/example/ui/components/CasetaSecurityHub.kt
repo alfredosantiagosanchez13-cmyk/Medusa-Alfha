@@ -56,6 +56,7 @@ import com.example.scanner.VisitorStatus
 import com.example.ui.screens.ActiveScreenTab
 import com.example.ui.theme.*
 import com.example.utils.ResidentNotificationManager
+import com.example.data.fcm.FcmNotificationManager
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -1062,16 +1063,24 @@ fun CasetaAccesosIsolatedSection(
                                 hostResidentName = pass.hostResidentName
                             )
                         )
-                        ResidentNotificationManager.notifyCustomVisitorEntry(
+                        FcmNotificationManager.sendVisitorQrScannedNotification(
                             context = context,
-                            guestName = pass.guestName,
-                            destinationHouse = pass.destinationHouse,
+                            db = db,
+                            condominiumId = condo.displayName,
+                            unitId = pass.destinationHouse,
                             hostResidentName = pass.hostResidentName,
+                            guestName = pass.guestName,
+                            guestDocument = pass.guestDocument,
+                            passFolio = unifiedFolio,
+                            passCode = pass.passCode,
                             passTypeLabel = pass.passType.label,
-                            vehiclePlate = pass.vehiclePlate
+                            vehiclePlate = pass.vehiclePlate,
+                            guardName = "Guardia Caseta ${condo.shortTag}",
+                            gateLocation = "Garita ${condo.displayName}",
+                            guardNotes = "Ingreso QR verificado en caseta táctica"
                         )
                         activeVerificationResult = null
-                        Toast.makeText(context, "✅ INGRESO AUTORIZADO EN ${condo.displayName}", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "✅ INGRESO AUTORIZADO EN ${condo.displayName} (Push FCM Enviado)", Toast.LENGTH_SHORT).show()
                     }
                 }
             },

@@ -152,6 +152,7 @@ import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.WarningOrange
 import com.example.utils.ResidentNotificationManager
+import com.example.data.fcm.FcmNotificationManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -920,7 +921,7 @@ fun CameraXScannerScreen(
                                     vehiclePlate = vehiclePlate.ifBlank { passEntity.vehiclePlate ?: "" },
                                     passCode = passEntity.passCode,
                                     status = "CHECKED_IN",
-                                    guardNotes = note.ifBlank { "Ingreso verificado con escáner CameraX" },
+                                    notes = note.ifBlank { "Ingreso verificado con escáner CameraX" },
                                     guardName = "Guardia Garita ${activeCondo.shortTag}"
                                 )
                                 dataRepo.saveVisitor(firestoreVisitor, activeCondo.name)
@@ -934,21 +935,22 @@ fun CameraXScannerScreen(
                             }
                         }
 
-                        // 5. Notificar al residente anfitrión
-                        ResidentNotificationManager.notifyResidentVisitorCheckedIn(
-                            context = context,
-                            pass = passEntity,
-                            guardNotes = "Ingreso verificado y autorizado con escáner CameraX"
-                        )
-                        SmartNotificationHub.notifyVisitorEntry(
+                        // 5. Enviar Notificación FCM en Tiempo Real al Residente Anfitrión
+                        FcmNotificationManager.sendVisitorQrScannedNotification(
                             context = context,
                             db = db,
-                            guestName = passEntity.guestName,
+                            condominiumId = activeCondo.name,
                             unitId = passEntity.destinationHouse,
                             hostResidentName = passEntity.hostResidentName,
+                            guestName = passEntity.guestName,
+                            guestDocument = passEntity.guestDocument,
+                            passFolio = folio,
+                            passCode = passEntity.passCode,
                             passTypeLabel = passEntity.passType.label,
                             vehiclePlate = vehiclePlate.ifBlank { passEntity.vehiclePlate },
-                            passFolio = folio
+                            guardName = "Guardia Garita ${activeCondo.shortTag}",
+                            gateLocation = "Garita Principal (${activeCondo.displayName})",
+                            guardNotes = note.ifBlank { "Ingreso verificado y autorizado con escáner CameraX" }
                         )
 
                         // 6. Disparar animación de barrera abierta
@@ -1009,7 +1011,7 @@ fun CameraXScannerScreen(
                                     vehiclePlate = passEntity.vehiclePlate ?: "N/A",
                                     passCode = passEntity.passCode,
                                     status = "DENIED",
-                                    guardNotes = "Acceso Denegado: $reason",
+                                    notes = "Acceso Denegado: $reason",
                                     guardName = "Guardia Garita ${activeCondo.shortTag}"
                                 )
                                 dataRepo.saveVisitor(firestoreVisitor, activeCondo.name)

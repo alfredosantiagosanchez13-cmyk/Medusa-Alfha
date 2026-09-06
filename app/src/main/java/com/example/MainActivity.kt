@@ -88,6 +88,18 @@ class MainActivity : FragmentActivity() {
             Log.e(TAG, "Failed to initialize OfflineSyncEngine: ${e.message}", e)
         }
 
+        // Inicializar Firebase Cloud Messaging (FCM) para recepción en tiempo real
+        try {
+            com.example.data.fcm.FcmNotificationManager.initialize(
+                context = this,
+                currentUser = null,
+                condominiumId = "Los Prados Residencial"
+            )
+            Log.i(TAG, "🔥 FcmNotificationManager initialized successfully on app launch")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize FcmNotificationManager: ${e.message}", e)
+        }
+
         setContent {
             MEDUSAALFHATheme {
                 Surface(

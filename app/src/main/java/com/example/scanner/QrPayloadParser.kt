@@ -1,8 +1,5 @@
 package com.example.scanner
 
-import android.net.Uri
-import org.json.JSONObject
-
 data class ParsedQrPass(
     val passCode: String,
     val guestName: String? = null,
@@ -15,9 +12,26 @@ data class ParsedQrPass(
 
 /**
  * Parser resiliente para códigos QR capturados en caseta de seguridad.
- * Decodifica códigos directos, formatos JSON estructurados, URLs o Deeplinks.
+ * Implementado en Kotlin puro para alta velocidad, cero dependencias de framework
+ * y total compatibilidad con pruebas unitarias JVM y entornos Android.
  */
 object QrPayloadParser {
+
+    private val jsonKeyRegexes = listOf(
+        "passCode", "code", "entryCode", "folio", "id"
+    )
+
+    private fun extractJsonField(json: String, key: String): String? {
+        val pattern = Regex("""\"$key\"\s*:\s*\"([^\"]+)\"""", RegexOption.IGNORE_CASE)
+        val match = pattern.find(json)
+        return match?.groupValues?.getOrNull(1)?.trim()
+    }
+
+    private fun extractQueryParam(url: String, key: String): String? {
+        val pattern = Regex("""[?&]$key=([^&#\s]+)""", RegexOption.IGNORE_CASE)
+        val match = pattern.find(url)
+        return match?.groupValues?.getOrNull(1)?.trim()
+    }
 
     /**
      * Extrae el código de pase limpio de cualquier formato admitido:
@@ -32,36 +46,31 @@ object QrPayloadParser {
 
         // Formato JSON
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-            try {
-                val json = JSONObject(trimmed)
-                val code = json.optString("passCode").takeIf { it.isNotBlank() }
-                    ?: json.optString("code").takeIf { it.isNotBlank() }
-                    ?: json.optString("entryCode").takeIf { it.isNotBlank() }
-                    ?: json.optString("folio").takeIf { it.isNotBlank() }
-                    ?: json.optString("id").takeIf { it.isNotBlank() }
-                if (!code.isNullOrBlank()) return code.trim().trim('"', '\'')
-            } catch (_: Exception) {}
+            for (key in jsonKeyRegexes) {
+                val value = extractJsonField(trimmed, key)
+                if (!value.isNullOrBlank()) {
+                    return value.trim().trim('"', '\'')
+                }
+            }
         }
 
         // Formato URL / Deeplink con query param
-        if (trimmed.contains("?code=") || trimmed.contains("&code=") ||
-            trimmed.contains("?passCode=") || trimmed.contains("&passCode=") ||
-            trimmed.contains("?entryCode=") || trimmed.contains("&entryCode=")
-        ) {
-            try {
-                val uri = Uri.parse(trimmed)
-                val code = uri.getQueryParameter("code")
-                    ?: uri.getQueryParameter("passCode")
-                    ?: uri.getQueryParameter("entryCode")
-                    ?: uri.getQueryParameter("folio")
-                if (!code.isNullOrBlank()) return code.trim()
-            } catch (_: Exception) {}
+        if (trimmed.contains("?") || trimmed.contains("&")) {
+            for (param in listOf("code", "passCode", "entryCode", "folio", "id")) {
+                val value = extractQueryParam(trimmed, param)
+                if (!value.isNullOrBlank()) {
+                    return value.trim()
+                }
+            }
         }
 
         // Si es una URL con path terminado en el código (ej: https://app.com/pass/MED-1234)
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            val lastSegment = trimmed.substringAfterLast("/").substringBefore("?")
-            if (lastSegment.startsWith("MED-") || lastSegment.startsWith("VIS-") || lastSegment.startsWith("RES-")) {
+        if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+            val lastSegment = trimmed.substringAfterLast("/").substringBefore("?").substringBefore("#")
+            if (lastSegment.startsWith("MED-", ignoreCase = true) ||
+                lastSegment.startsWith("VIS-", ignoreCase = true) ||
+                lastSegment.startsWith("RES-", ignoreCase = true)
+            ) {
                 return lastSegment.trim()
             }
         }
@@ -77,23 +86,26 @@ object QrPayloadParser {
         val extractedCode = extractEntryCode(trimmed)
 
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-            try {
-                val json = JSONObject(trimmed)
-                return ParsedQrPass(
-                    passCode = extractedCode,
-                    guestName = json.optString("guestName").takeIf { it.isNotBlank() }
-                        ?: json.optString("visitorName").takeIf { it.isNotBlank() },
-                    destinationHouse = json.optString("destinationHouse").takeIf { it.isNotBlank() }
-                        ?: json.optString("unitId").takeIf { it.isNotBlank() }
-                        ?: json.optString("house").takeIf { it.isNotBlank() },
-                    hostResidentName = json.optString("hostResidentName").takeIf { it.isNotBlank() }
-                        ?: json.optString("residentName").takeIf { it.isNotBlank() },
-                    vehiclePlate = json.optString("vehiclePlate").takeIf { it.isNotBlank() }
-                        ?: json.optString("plate").takeIf { it.isNotBlank() },
-                    passType = json.optString("passType").takeIf { it.isNotBlank() },
-                    rawPayload = raw
-                )
-            } catch (_: Exception) {}
+            val guest = extractJsonField(trimmed, "guestName")
+                ?: extractJsonField(trimmed, "visitorName")
+            val destination = extractJsonField(trimmed, "destinationHouse")
+                ?: extractJsonField(trimmed, "unitId")
+                ?: extractJsonField(trimmed, "house")
+            val host = extractJsonField(trimmed, "hostResidentName")
+                ?: extractJsonField(trimmed, "residentName")
+            val plate = extractJsonField(trimmed, "vehiclePlate")
+                ?: extractJsonField(trimmed, "plate")
+            val type = extractJsonField(trimmed, "passType")
+
+            return ParsedQrPass(
+                passCode = extractedCode,
+                guestName = guest,
+                destinationHouse = destination,
+                hostResidentName = host,
+                vehiclePlate = plate,
+                passType = type,
+                rawPayload = raw
+            )
         }
 
         return ParsedQrPass(

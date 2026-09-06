@@ -63,6 +63,7 @@ object FirestoreTenantManager {
     const val SUB_SHIFT_HANDOVER = "shift_handover"
     const val SUB_ANNOUNCEMENTS = "announcements"
     const val SUB_AMENITY_BOOKINGS = "amenity_bookings"
+    const val SUB_BOOKINGS = "bookings"
     const val SUB_AUDIT_LOGS = "audit_logs"
     const val SUB_USERS = "users"
     const val SUB_USER_PROFILES = "user_profiles"
@@ -806,7 +807,13 @@ object FirestoreTenantManager {
                 .set(payload, SetOptions.merge())
                 .await()
 
-            Log.i(TAG, "[$validId] Reserva ${booking.folio} (${booking.amenityName}) sincronizada en Firestore con aislamiento.")
+            // Sincronización en la colección 'bookings' del condominio para interoperabilidad
+            val bookingsSubcollection = getTenantSubcollection(firestore, validId, SUB_BOOKINGS)
+            bookingsSubcollection.document(booking.folio)
+                .set(payload, SetOptions.merge())
+                .await()
+
+            Log.i(TAG, "[$validId] Reserva ${booking.folio} (${booking.amenityName}) sincronizada en Firestore (subcolecciones 'bookings' y 'amenity_bookings') con aislamiento.")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error guardando reserva en Firestore: ${e.message}")
