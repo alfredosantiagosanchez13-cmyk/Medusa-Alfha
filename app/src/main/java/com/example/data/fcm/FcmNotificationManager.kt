@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
 import android.util.Log
-import com.example.auth.User
+import com.example.data.auth.AlfhaUserEntity
 import com.example.data.booking.AppDatabase
 import com.example.data.firebase.FirebaseConfigHelper
 import com.example.data.notifications.SmartNotificationHub
@@ -80,7 +80,7 @@ object FcmNotificationManager {
     /**
      * Inicializa FCM para el usuario actual (residente o personal) en el condominio activo.
      */
-    fun initialize(context: Context, currentUser: User?, condominiumId: String) {
+    fun initialize(context: Context, currentUser: AlfhaUserEntity?, condominiumId: String) {
         val prefs = getPrefs(context)
         val cachedToken = prefs.getString(KEY_FCM_TOKEN, null)
         if (!cachedToken.isNullOrBlank()) {
@@ -100,7 +100,7 @@ object FcmNotificationManager {
             }
 
             // Iniciar escucha reactiva en Firestore para notificaciones dirigidas a la unidad del residente
-            if (currentUser != null && !currentUser.unitOrDepartment.isNullOrBlank()) {
+            if (currentUser != null && currentUser.unitOrDepartment.isNotBlank()) {
                 startRealtimeResidentNotificationsListener(context, condominiumId, currentUser.unitOrDepartment)
             }
         }
@@ -109,7 +109,7 @@ object FcmNotificationManager {
     /**
      * Obtiene el token FCM nativo de FirebaseMessaging y lo registra en Firestore
      */
-    private fun fetchAndRegisterFcmToken(context: Context, currentUser: User?, condominiumId: String) {
+    private fun fetchAndRegisterFcmToken(context: Context, currentUser: AlfhaUserEntity?, condominiumId: String) {
         try {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
                 if (!task.isSuccessful) {
@@ -153,7 +153,7 @@ object FcmNotificationManager {
      * - Tópico general del condominio: condo_{condoId}
      * - Tópico específico de la unidad: unit_{condoId}_{unitId}
      */
-    fun subscribeResidentTopics(user: User, condominiumId: String) {
+    fun subscribeResidentTopics(user: AlfhaUserEntity, condominiumId: String) {
         try {
             val condoTopic = "condo_${sanitizeTopic(condominiumId)}"
             FirebaseMessaging.getInstance().subscribeToTopic(condoTopic).addOnCompleteListener { task ->
@@ -163,7 +163,7 @@ object FcmNotificationManager {
             }
 
             val unit = user.unitOrDepartment
-            if (!unit.isNullOrBlank()) {
+            if (unit.isNotBlank()) {
                 val unitTopic = "unit_${sanitizeTopic(condominiumId)}_${sanitizeTopic(unit)}"
                 FirebaseMessaging.getInstance().subscribeToTopic(unitTopic).addOnCompleteListener { task ->
                     if (task.isSuccessful) {
@@ -181,7 +181,7 @@ object FcmNotificationManager {
     /**
      * Guarda el token del dispositivo en Firestore bajo la unidad y bajo tokens globales
      */
-    private fun saveTokenToFirestore(token: String, user: User, condominiumId: String) {
+    private fun saveTokenToFirestore(token: String, user: AlfhaUserEntity, condominiumId: String) {
         try {
             val firestore = FirebaseConfigHelper.getFirestore() ?: return
             val cleanCondo = condominiumId.ifBlank { "Los Prados Residencial" }
@@ -437,21 +437,13 @@ object FcmNotificationManager {
 
         // 4. Disparar notificación visual local en el dispositivo
         try {
-            ResidentNotificationManager.notifyResidentVisitorCheckedIn(
+            ResidentNotificationManager.notifyCustomVisitorEntry(
                 context = context,
-                pass = com.example.scanner.QrPassEntity(
-                    passCode = passCode,
-                    hostResidentName = hostResidentName,
-                    destinationHouse = unitId,
-                    guestName = guestName,
-                    guestDocument = guestDocument,
-                    validFromMillis = System.currentTimeMillis() - 3600000,
-                    validUntilMillis = System.currentTimeMillis() + 86400000,
-                    passType = com.example.scanner.PassType.GENERAL,
-                    vehiclePlate = vehiclePlate,
-                    status = com.example.scanner.PassStatus.USED
-                ),
-                guardNotes = "Escaneado en $gateLocation por $guardName"
+                guestName = guestName,
+                destinationHouse = unitId,
+                hostResidentName = hostResidentName,
+                passTypeLabel = passTypeLabel,
+                vehiclePlate = vehiclePlate
             )
         } catch (e: Exception) {
             Log.w(TAG, "Error lanzando notificación directa: ${e.message}")

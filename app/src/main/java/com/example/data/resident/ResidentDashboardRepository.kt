@@ -12,7 +12,9 @@ import com.example.data.firebase.FirebaseConfigHelper
 import com.example.data.firebase.FirestoreTenantManager
 import com.example.data.passes.QrPassRoomEntity
 import com.example.data.visitor.FirestoreVisitorLog
+import com.example.data.visitor.VisitorCheckIn
 import com.example.scanner.PassType
+import com.example.utils.AmenityReminderManager
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -234,6 +236,24 @@ object ResidentDashboardRepository {
 
         // 1. Guardar en Room local para disponibilidad offline inmediata
         db.qrPassDao().insertPass(pass)
+        try {
+            db.visitorCheckInDao().insertCheckIn(
+                VisitorCheckIn(
+                    folio = passCode,
+                    visitorName = guestName.trim(),
+                    visitorDocument = if (guestDocument.isBlank()) "Sin Documento" else guestDocument.trim(),
+                    destinationHouse = user.unitOrDepartment,
+                    passCode = passCode,
+                    passTypeLabel = passType.label,
+                    vehiclePlate = vehiclePlate?.takeIf { it.isNotBlank() },
+                    status = "PRE_REGISTRADO",
+                    timestampMillis = now,
+                    guardNotes = "Pre-registro generado desde Portal Residente",
+                    residentNotes = note,
+                    hostResidentName = user.name
+                )
+            )
+        } catch (_: Exception) {}
 
         // 2. Guardar en Firestore con aislamiento por tenant y vinculado a la cuenta del residente
         val firestore = FirebaseConfigHelper.getFirestore()
@@ -302,7 +322,8 @@ object ResidentDashboardRepository {
         timeSlot: String,
         durationMinutes: Int = 120,
         notes: String = "",
-        firebaseUid: String? = null
+        firebaseUid: String? = null,
+        context: Context? = null
     ): Result<AmenityBooking> = withContext(Dispatchers.IO) {
         val validCondo = condominiumId.uppercase().trim()
         val folio = AlphaCoreEngine.generateUniqueFolio("RSV")
@@ -328,20 +349,26 @@ object ResidentDashboardRepository {
         )
 
         // 1. Guardar en Room local
-        db.amenityBookingDao().insertBooking(booking)
+        val insertedId = db.amenityBookingDao().insertBooking(booking)
+        val finalBooking = booking.copy(id = insertedId)
 
-        // 2. Guardar en Firestore con aislamiento por tenant y userId de Firebase Auth
+        // 2. Programar recordatorio local 1 hora antes de la reserva
+        if (context != null) {
+            AmenityReminderManager.scheduleOneHourReminder(context, finalBooking)
+        }
+
+        // 3. Guardar en Firestore con aislamiento por tenant y userId de Firebase Auth
         val firestore = FirebaseConfigHelper.getFirestore()
         if (firestore != null && FirebaseConfigHelper.isFirebaseAvailable.value) {
             FirestoreTenantManager.saveAmenityBooking(
                 firestore = firestore,
                 condominiumId = validCondo,
-                booking = booking,
+                booking = finalBooking,
                 userId = effectiveUid
             )
         }
 
-        // 3. Auditoría inmutable
+        // 4. Auditoría inmutable
         db.auditLogDao().insertAuditLog(
             AuditLogEntity(
                 folio = AlphaCoreEngine.generateUniqueFolio("AUD"),
@@ -349,12 +376,12 @@ object ResidentDashboardRepository {
                 actionType = "AMENITY_BOOKED_BY_RESIDENT",
                 location = user.unitOrDepartment,
                 targetEntity = "$amenityName [$folio]",
-                changeDetails = "Reserva generada para $dateFmt $timeSlot en $validCondo",
+                changeDetails = "Reserva generada para $dateFmt $timeSlot en $validCondo. Recordatorio local de 1 hora programado.",
                 resultStatus = "CONFIRMADA"
             )
         )
 
-        Result.success(booking)
+        Result.success(finalBooking)
     }
 
     /**
@@ -365,7 +392,8 @@ object ResidentDashboardRepository {
         condominiumId: String,
         user: AlfhaUserEntity,
         booking: AmenityBooking,
-        reason: String = "Cancelado por el residente desde su Panel"
+        reason: String = "Cancelado por el residente desde su Panel",
+        context: Context? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val validCondo = condominiumId.uppercase().trim()
         val now = System.currentTimeMillis()
@@ -378,7 +406,12 @@ object ResidentDashboardRepository {
             nowMillis = now
         )
 
-        // 2. Cancelar en Firestore
+        // 2. Cancelar alarma local programada
+        if (context != null) {
+            AmenityReminderManager.cancelReminder(context, booking.id)
+        }
+
+        // 3. Cancelar en Firestore
         val firestore = FirebaseConfigHelper.getFirestore()
         if (firestore != null && FirebaseConfigHelper.isFirebaseAvailable.value) {
             FirestoreTenantManager.cancelAmenityBookingInFirestore(
@@ -390,7 +423,7 @@ object ResidentDashboardRepository {
             )
         }
 
-        // 3. Auditoría inmutable
+        // 4. Auditoría inmutable
         db.auditLogDao().insertAuditLog(
             AuditLogEntity(
                 folio = AlphaCoreEngine.generateUniqueFolio("AUD"),

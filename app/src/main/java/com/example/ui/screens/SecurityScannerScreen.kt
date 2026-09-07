@@ -154,7 +154,7 @@ enum class ActiveScreenTab(val label: String, val icon: androidx.compose.ui.grap
     GENERATOR("12 Generar QR", Icons.Default.QrCode),
     SUPERVISION("13 Supervisión", Icons.Default.Shield),
     MASTER_ALPHA("14 Panel Maestro", Icons.Default.Schedule),
-    HISTORY("15 Historial", Icons.Default.History),
+    HISTORY("15 Gestión Visitas", Icons.Default.History),
     ANALYTICS("16 Analítica", Icons.Default.Analytics),
     AI_COPILOT("17 Copiloto AI", Icons.Default.AutoAwesome)
 }
@@ -444,70 +444,11 @@ fun SecurityScannerScreen() {
                 }
 
                 ActiveScreenTab.HISTORY -> {
-                    com.example.ui.screens.VisitorHistoryScreen(
-                        entries = visitorEntries,
-                        onStatusChange = { entry, newStatus ->
-                            val idLong = entry.id.toLongOrNull()
-                            if (idLong != null) {
-                                scope.launch {
-                                    if (newStatus == VisitorStatus.DEPARTED) {
-                                        repository.registerCheckOut(idLong, notes = "Salida confirmada en garita con 1 toque")
-                                        val duration = entry.durationStay ?: "Normal"
-                                        ResidentNotificationManager.notifyVisitorDeparted(
-                                            context = context,
-                                            guestName = entry.visitorName,
-                                            destinationHouse = entry.destinationHouse,
-                                            hostResidentName = entry.hostResidentName,
-                                            durationStay = duration
-                                        )
-                                        SmartNotificationHub.notifyVisitorExit(
-                                            context = context,
-                                            db = db,
-                                            guestName = entry.visitorName,
-                                            unitId = entry.destinationHouse,
-                                            hostResidentName = entry.hostResidentName,
-                                            durationStay = duration,
-                                            checkInFolio = entry.folio
-                                        )
-                                        db.auditLogDao().insertAuditLog(
-                                            AuditLogEntity(
-                                                folio = AlphaCoreEngine.generateUniqueFolio("AUD"),
-                                                operatorName = "Guardia Garita 1",
-                                                actionType = "CHECK_OUT_ONE_TOUCH",
-                                                location = "Garita Principal",
-                                                targetEntity = "${entry.visitorName} (${entry.folio})",
-                                                changeDetails = "Salida táctica de 1 toque. Permanencia: $duration",
-                                                resultStatus = "EXITOSO"
-                                            )
-                                        )
-                                    } else {
-                                        repository.updateCheckInStatus(
-                                            id = idLong,
-                                            status = newStatus.name,
-                                            notes = if (newStatus == VisitorStatus.VERIFIED) "Entrada verificada por agente" else "Entrada rechazada por agente"
-                                        )
-                                    }
-                                }
-                                if (newStatus == VisitorStatus.VERIFIED) {
-                                    ResidentNotificationManager.notifyCustomVisitorEntry(
-                                        context = context,
-                                        guestName = entry.visitorName,
-                                        destinationHouse = entry.destinationHouse,
-                                        hostResidentName = entry.hostResidentName,
-                                        passTypeLabel = entry.passTypeLabel,
-                                        vehiclePlate = entry.vehiclePlate
-                                    )
-                                }
-                                val statusMsg = if (newStatus == VisitorStatus.VERIFIED) "Verificado y Notificado al Residente" else if (newStatus == VisitorStatus.DEPARTED) "Salida Registrada y Notificado al Residente" else "Denegado"
-                                Toast.makeText(context, "Estado actualizado: $statusMsg", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        onClearHistory = {
-                            scope.launch {
-                                repository.deleteAllCheckIns()
-                            }
-                            Toast.makeText(context, "Historial de Room DB borrado", Toast.LENGTH_SHORT).show()
-                        }
+                    com.example.ui.screens.VisitorManagementScreen(
+                        db = db,
+                        condominiumId = "PRADOS_1",
+                        userUnit = "Casa #104",
+                        userName = "Carlos Mendoza"
                     )
                 }
 
@@ -646,10 +587,11 @@ fun SecurityScannerScreen() {
                                     }
 
                                     // Send real-time FCM notification automatically to the resident
+                                    val activeCondo = result.condominiumId ?: "Los Prados Residencial"
                                     FcmNotificationManager.sendVisitorQrScannedNotification(
                                         context = context,
                                         db = db,
-                                        condominiumId = selectedCondo.displayName,
+                                        condominiumId = activeCondo,
                                         unitId = pass.destinationHouse,
                                         hostResidentName = pass.hostResidentName,
                                         guestName = pass.guestName,
@@ -659,7 +601,7 @@ fun SecurityScannerScreen() {
                                         passTypeLabel = pass.passType.label,
                                         vehiclePlate = pass.vehiclePlate,
                                         guardName = outcome.user.name,
-                                        gateLocation = "Garita Principal (${selectedCondo.shortTag})",
+                                        gateLocation = "Garita Principal ($activeCondo)",
                                         guardNotes = "Ingreso Verificado con Escáner CameraX por Seguridad"
                                     )
 

@@ -48,6 +48,22 @@ class VisitorCheckInRepository(
         }
     }
 
+    suspend fun registerCheckInEntry(id: Long, notes: String? = "Ingreso verificado en caseta") {
+        visitorCheckInDao.updateCheckInStatus(id, "CHECKED_IN", notes)
+        withContext(Dispatchers.IO) {
+            val fs = FirebaseConfigHelper.getFirestore()
+            if (fs != null) {
+                try {
+                    val all = visitorCheckInDao.getAllCheckInsList()
+                    val target = all.firstOrNull { it.id == id }
+                    if (target != null) {
+                        FirestoreTenantManager.saveVisitorCheckIn(fs, activeCondominiumId, target)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     suspend fun registerCheckOut(id: Long, notes: String? = "Salida confirmada en garita") {
         visitorCheckInDao.registerCheckOut(id, notes = notes)
         withContext(Dispatchers.IO) {
@@ -61,6 +77,101 @@ class VisitorCheckInRepository(
                     }
                 } catch (_: Exception) {}
             }
+        }
+    }
+
+    /**
+     * Registra un nuevo invitado por parte del residente o guardia y lo persiste
+     * directamente en Firestore (/condominiums/{condoId}/visitor_logs) y en Room DB.
+     */
+    suspend fun registerGuestAndLogToFirestore(
+        condominiumId: String = activeCondominiumId,
+        visitorName: String,
+        authorizedUnitNumber: String,
+        hostResidentName: String,
+        visitorDocument: String = "Sin Documento",
+        passTypeLabel: String = "Visita Familiar",
+        vehiclePlate: String? = null,
+        residentNotes: String? = null,
+        isImmediateCheckIn: Boolean = false,
+        guardNotes: String? = null
+    ): Result<VisitorCheckIn> = withContext(Dispatchers.IO) {
+        try {
+            val folio = AlphaCoreEngine.generateUniqueFolio("MED")
+            val passCode = "PASS-${folio.takeLast(6)}"
+            val status = if (isImmediateCheckIn) "CHECKED_IN" else "PRE_REGISTRADO"
+            val now = System.currentTimeMillis()
+
+            val checkIn = VisitorCheckIn(
+                id = 0,
+                folio = folio,
+                visitorName = visitorName.trim(),
+                visitorDocument = visitorDocument.trim(),
+                destinationHouse = authorizedUnitNumber.trim(),
+                passCode = passCode,
+                passTypeLabel = passTypeLabel,
+                vehiclePlate = vehiclePlate?.trim()?.ifBlank { null },
+                status = status,
+                timestampMillis = now,
+                guardNotes = guardNotes ?: if (isImmediateCheckIn) "Ingreso inmediato registrado" else "Pre-registro de residente",
+                residentNotes = residentNotes?.trim()?.ifBlank { null },
+                hostResidentName = hostResidentName.trim()
+            )
+
+            val insertedId = visitorCheckInDao.insertCheckIn(checkIn)
+            val finalEntity = checkIn.copy(id = insertedId)
+
+            // Sincronizar en Firestore
+            val fs = FirebaseConfigHelper.getFirestore()
+            if (fs != null) {
+                try {
+                    val firestoreLog = FirestoreVisitorLog.fromVisitorCheckIn(finalEntity, condominiumId)
+                    FirestoreTenantManager.saveVisitorLog(fs, condominiumId, firestoreLog)
+                    FirestoreTenantManager.saveVisitorCheckIn(fs, condominiumId, finalEntity)
+                } catch (e: Exception) {
+                    Log.w("VisitorCheckInRepo", "Fallo al guardar log en Firestore: ${e.message}")
+                }
+            }
+
+            Result.success(finalEntity)
+        } catch (e: Exception) {
+            Log.e("VisitorCheckInRepo", "Error al registrar invitado: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Sincroniza y descarga los logs de visitantes desde Firestore hacia Room DB.
+     */
+    suspend fun syncFromFirestore(condominiumId: String = activeCondominiumId): Result<Int> = withContext(Dispatchers.IO) {
+        val fs = FirebaseConfigHelper.getFirestore()
+            ?: return@withContext Result.failure(Exception("Firestore no disponible en este dispositivo"))
+
+        try {
+            val queryResult = FirestoreTenantManager.queryVisitorLogs(fs, condominiumId, limitCount = 100)
+            if (queryResult.isSuccess) {
+                val remoteLogs = queryResult.getOrNull() ?: emptyList()
+                var newOrUpdatedCount = 0
+
+                for (log in remoteLogs) {
+                    val converted = log.toVisitorCheckIn()
+                    val existing = visitorCheckInDao.getCheckInByFolio(converted.folio)
+                    if (existing == null) {
+                        visitorCheckInDao.insertCheckIn(converted)
+                        newOrUpdatedCount++
+                    } else if (existing.status != converted.status || existing.checkOutMillis != converted.checkOutMillis) {
+                        // Actualizar estado si cambió en la nube
+                        visitorCheckInDao.insertCheckIn(converted.copy(id = existing.id))
+                        newOrUpdatedCount++
+                    }
+                }
+                Result.success(newOrUpdatedCount)
+            } else {
+                Result.failure(queryResult.exceptionOrNull() ?: Exception("Error al consultar logs en Firestore"))
+            }
+        } catch (e: Exception) {
+            Log.e("VisitorCheckInRepo", "Error sincronizando desde Firestore: ${e.message}", e)
+            Result.failure(e)
         }
     }
 

@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Pool
 import androidx.compose.material.icons.filled.QrCode
@@ -334,6 +335,17 @@ fun AmenityBookingHub(
                         scope.launch(Dispatchers.IO) {
                             db.amenityBookingDao().markReminderSent(booking.id)
                         }
+                    },
+                    onTrigger1HourReminder = { booking ->
+                        AmenityReminderManager.sendOneHourReminderNotification(
+                            context = context,
+                            bookingId = booking.id,
+                            amenityName = booking.amenityName,
+                            residentName = booking.residentName,
+                            unitId = booking.unitId,
+                            bookingTimeMillis = booking.bookingTimeMillis
+                        )
+                        Toast.makeText(context, "⏰ Notificación -1h enviada para ${booking.amenityName}", Toast.LENGTH_SHORT).show()
                     }
                 )
             }
@@ -899,7 +911,8 @@ private fun ActiveBookingsListView(
     bookings: List<AmenityBooking>,
     onCancelRequest: (AmenityBooking) -> Unit,
     onShowQr: (AmenityBooking) -> Unit,
-    onTriggerReminder: (AmenityBooking) -> Unit
+    onTriggerReminder: (AmenityBooking) -> Unit,
+    onTrigger1HourReminder: (AmenityBooking) -> Unit = {}
 ) {
     if (bookings.isEmpty()) {
         Surface(
@@ -924,7 +937,8 @@ private fun ActiveBookingsListView(
                     booking = booking,
                     onCancel = { onCancelRequest(booking) },
                     onShowQr = { onShowQr(booking) },
-                    onReminder = { onTriggerReminder(booking) }
+                    onReminder = { onTriggerReminder(booking) },
+                    on1HourReminder = { onTrigger1HourReminder(booking) }
                 )
             }
         }
@@ -936,7 +950,8 @@ private fun ActiveBookingCard(
     booking: AmenityBooking,
     onCancel: () -> Unit,
     onShowQr: () -> Unit,
-    onReminder: () -> Unit
+    onReminder: () -> Unit,
+    on1HourReminder: () -> Unit = {}
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1009,41 +1024,80 @@ private fun ActiveBookingCard(
                 Text("Nota: ${booking.notes}", color = TextMuted, fontSize = 10.sp)
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Badge de Recordatorios Programados (1h y 15m)
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = CyanNeon.copy(alpha = 0.1f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyanNeon.copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Alarm,
+                        contentDescription = null,
+                        tint = CyanNeon,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Alarmas automáticas: 1 hora y 15 min antes",
+                        color = CyanNeon,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 OutlinedButton(
                     onClick = onShowQr,
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(14.dp), tint = GoldPrimary)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Ver Pase", fontSize = 10.sp, color = GoldPrimary)
+                    Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(13.dp), tint = GoldPrimary)
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text("Pase", fontSize = 10.sp, color = GoldPrimary)
+                }
+
+                OutlinedButton(
+                    onClick = on1HourReminder,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1.1f)
+                ) {
+                    Icon(Icons.Default.Alarm, contentDescription = null, modifier = Modifier.size(13.dp), tint = CyanNeon)
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text("-1h Alerta", fontSize = 10.sp, color = CyanNeon)
                 }
 
                 OutlinedButton(
                     onClick = onReminder,
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1.1f)
                 ) {
-                    Icon(Icons.Default.Alarm, contentDescription = null, modifier = Modifier.size(14.dp), tint = CyanNeon)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("-15m Test", fontSize = 10.sp, color = CyanNeon)
+                    Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(13.dp), tint = GoldPrimary)
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text("-15m", fontSize = 10.sp, color = GoldPrimary)
                 }
 
                 Button(
                     onClick = onCancel,
                     colors = ButtonDefaults.buttonColors(containerColor = ErrorRed.copy(alpha = 0.2f), contentColor = ErrorRed),
                     shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1.1f)
+                    modifier = Modifier.weight(1.2f)
                 ) {
-                    Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(2.dp))
                     Text("Cancelar", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }

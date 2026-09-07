@@ -321,6 +321,7 @@ object AmenityBookingEngine {
         )
 
         // 5. Programar Recordatorio y Despachar Notificaciones
+        AmenityReminderManager.scheduleOneHourReminder(context, savedBooking)
         AmenityReminderManager.schedule15MinReminder(context, savedBooking)
 
         val scheduleFormatted = "$dateFormatted $timeSlotFormatted"

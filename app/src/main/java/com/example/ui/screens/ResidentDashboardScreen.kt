@@ -53,6 +53,7 @@ import com.example.data.resident.ResidentDashboardRepository
 import com.example.data.resident.ResidentDashboardState
 import com.example.data.fcm.FcmNotificationManager
 import com.example.data.fcm.VisitorCheckInFcmPayload
+import com.example.utils.AmenityReminderManager
 import com.example.scanner.PassType
 import com.example.ui.components.AmenityCalendarView
 import com.example.ui.components.getAmenityIcon
@@ -652,7 +653,8 @@ fun ResidentDashboardScreen(
                                 db = db,
                                 condominiumId = condominiumId,
                                 user = currentUser,
-                                booking = booking
+                                booking = booking,
+                                context = context
                             )
                             bookingToCancel = null
                             refreshData()
@@ -1736,12 +1738,75 @@ private fun UpcomingBookingCard(
                 )
             }
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Indicador de Recordatorio Programado (1 hora antes)
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = CyanNeon.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Alarm,
+                            contentDescription = null,
+                            tint = CyanNeon,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Recordatorio local: 1 hora antes activo",
+                            color = CyanNeon,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = if (booking.reminderSent) "Notificado" else "Programado",
+                        color = if (booking.reminderSent) SuccessGreen else TextMuted,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                val cardContext = LocalContext.current
+                OutlinedButton(
+                    onClick = {
+                        AmenityReminderManager.sendOneHourReminderNotification(
+                            context = cardContext,
+                            bookingId = booking.id,
+                            amenityName = booking.amenityName,
+                            residentName = booking.residentName,
+                            unitId = booking.unitId,
+                            bookingTimeMillis = booking.bookingTimeMillis
+                        )
+                        Toast.makeText(cardContext, "⏰ Notificación de 1h antes enviada para ${booking.amenityName}", Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon),
+                    border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.testTag("btn_test_1h_reminder_${booking.folio}")
+                ) {
+                    Icon(Icons.Default.Alarm, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Probar Alerta 1h", fontSize = 11.sp)
+                }
+
                 OutlinedButton(
                     onClick = onCancelClick,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
@@ -3385,10 +3450,11 @@ private fun CreateAmenityBookingDialog(
                                 bookingDateCalendar = bookingCal,
                                 timeSlot = slot.slotLabel,
                                 notes = notes.ifBlank { "Reserva desde Calendario Visual" },
-                                firebaseUid = firebaseUid
+                                firebaseUid = firebaseUid,
+                                context = context
                             )
                             isSubmitting = false
-                            Toast.makeText(context, "✅ Reserva confirmada: ${selectedAmenity.name} (${slot.slotLabel})", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "✅ Reserva confirmada: ${selectedAmenity.name} (${slot.slotLabel}) • Recordatorio 1h antes activado", Toast.LENGTH_LONG).show()
                             onBookingCreated()
                             onDismiss()
                         }
