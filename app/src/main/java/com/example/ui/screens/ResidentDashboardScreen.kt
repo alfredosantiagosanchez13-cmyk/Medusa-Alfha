@@ -56,6 +56,10 @@ import com.example.data.fcm.VisitorCheckInFcmPayload
 import com.example.utils.AmenityReminderManager
 import com.example.scanner.PassType
 import com.example.ui.components.AmenityCalendarView
+import com.example.ui.components.GenerateTimedTokenDialog
+import com.example.ui.components.TimeLimitedDigitalPassModal
+import com.example.ui.components.TimedTokenStatusBadge
+import com.example.ui.components.VisitorAccessTokenInfo
 import com.example.ui.components.getAmenityIcon
 import com.example.ui.theme.*
 import com.google.zxing.BarcodeFormat
@@ -596,24 +600,50 @@ fun ResidentDashboardScreen(
         }
     }
 
-    // Modal de Detalle de Código QR
+    // Modal de Detalle de Código QR con Token Temporal
     selectedQrPassForDetail?.let { pass ->
-        QrDetailModal(
-            pass = pass,
+        val durationH = ((pass.validUntilMillis - pass.createdAtMillis) / (3600 * 1000L)).toInt().coerceAtLeast(1)
+        val tokenInfo = VisitorAccessTokenInfo(
+            tokenId = "TOK-${pass.passCode.takeLast(6)}",
+            passCode = pass.passCode,
+            folio = "FOL-${pass.passCode.take(8)}",
+            visitorName = pass.guestName,
+            visitorDocument = pass.guestDocument,
+            destinationHouse = pass.destinationHouse,
+            hostResidentName = pass.hostResidentName,
+            passTypeLabel = pass.passType.label,
+            vehiclePlate = pass.vehiclePlate,
+            issuedAtMillis = pass.createdAtMillis,
+            validUntilMillis = pass.validUntilMillis,
+            durationHours = durationH,
+            maxEntries = pass.maxEntries,
+            currentEntriesCount = pass.currentEntriesCount,
+            integrityHash = pass.integrityHash,
+            residentNotes = pass.note,
+            isActive = pass.isActive
+        )
+        TimeLimitedDigitalPassModal(
+            tokenInfo = tokenInfo,
+            db = db,
             onDismiss = { selectedQrPassForDetail = null }
         )
     }
 
-    // Diálogo para registrar visitante y generar código único de entrada vinculado
+    // Diálogo interactivo para generar Token Temporal Único con QR
     if (showNewQrDialog) {
-        RegisterVisitorFormDialog(
-            user = currentUser,
-            condominiumId = condominiumId,
-            firebaseUid = state.firebaseAuthUid,
+        GenerateTimedTokenDialog(
             db = db,
+            condominiumId = condominiumId,
+            defaultUnit = currentUser.unitOrDepartment,
+            defaultHost = currentUser.name,
             onDismiss = { showNewQrDialog = false },
-            onPassCreated = { pass ->
+            onTokenCreated = { token ->
+                showNewQrDialog = false
                 refreshData()
+                scope.launch {
+                    val pass = db.qrPassDao().getPassByCode(token.passCode)
+                    selectedQrPassForDetail = pass
+                }
             }
         )
     }
@@ -1471,18 +1501,22 @@ private fun ActiveQrPassCard(
                     )
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = GoldPrimary.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.4f))
-                ) {
-                    Text(
-                        text = pass.passType.label,
-                        color = GoldPrimary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TimedTokenStatusBadge(validUntilMillis = pass.validUntilMillis)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = GoldPrimary.copy(alpha = 0.15f),
+                        border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.4f))
+                    ) {
+                        Text(
+                            text = pass.passType.label,
+                            color = GoldPrimary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
 

@@ -70,6 +70,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -481,13 +482,6 @@ fun VisitorManagementScreen(
                         selectedLabelColor = NavyDark,
                         containerColor = NavySurface,
                         labelColor = TextMuted
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, if (selected) GoldPrimary else Color.White.copy(alpha = 0.1f)),
-                    modifier = Modifier.testTag(tag)
-                )
-            }
-        }
                     ),
                     shape = RoundedCornerShape(8.dp),
                     border = BorderStroke(1.dp, if (selected) GoldPrimary else Color.White.copy(alpha = 0.1f)),

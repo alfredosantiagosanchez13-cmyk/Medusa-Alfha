@@ -86,7 +86,7 @@ import com.example.data.booking.AppDatabase
 import com.example.data.core.AlphaCoreEngine
 import com.example.data.firebase.FirebaseConfigHelper
 import com.example.data.firebase.FirestoreTenantManager
-import com.example.data.firebase.FirestoreVisitorLog
+import com.example.data.visitor.FirestoreVisitorLog
 import com.example.data.passes.QrPassRepository
 import com.example.data.passes.QrPassRoomEntity
 import com.example.data.visitor.VisitorCheckIn
@@ -245,7 +245,7 @@ suspend fun createAndStoreTimeLimitedToken(
         destinationHouse = tokenInfo.destinationHouse,
         hostResidentName = tokenInfo.hostResidentName,
         vehiclePlate = tokenInfo.vehiclePlate,
-        passType = if (maxEntries == 1) PassType.VISITOR_SINGLE else PassType.VISITOR_MULTI,
+        passType = if (maxEntries == 1) PassType.VISITOR_SINGLE else PassType.EVENT_GUEST,
         validUntilMillis = validUntilMillis,
         maxEntries = maxEntries,
         currentEntriesCount = 0,
@@ -1112,7 +1112,7 @@ fun TimeLimitedDigitalPassModal(
                         onClick = {
                             scope.launch {
                                 val repo = QrPassRepository(db.qrPassDao())
-                                val verification = repo.verifyPass(tokenInfo.passCode)
+                                val verification = repo.verifyPassCode(tokenInfo.passCode)
                                 when (verification.status) {
                                     PassStatus.VALID -> {
                                         Toast.makeText(
