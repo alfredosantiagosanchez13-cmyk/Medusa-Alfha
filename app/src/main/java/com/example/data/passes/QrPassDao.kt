@@ -34,6 +34,9 @@ interface QrPassDao {
     @Query("UPDATE qr_passes SET currentEntriesCount = currentEntriesCount + 1 WHERE passCode = :passCode")
     suspend fun incrementUsage(passCode: String)
 
+    @Query("UPDATE qr_passes SET isActive = 0 WHERE passCode = :passCode")
+    suspend fun deactivatePass(passCode: String)
+
     @Query("SELECT COUNT(*) FROM qr_passes")
     suspend fun getPassCount(): Int
 

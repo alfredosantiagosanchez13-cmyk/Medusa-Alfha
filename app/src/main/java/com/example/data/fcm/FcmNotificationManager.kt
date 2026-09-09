@@ -6,7 +6,10 @@ import android.os.Build
 import android.util.Log
 import com.example.data.auth.AlfhaUserEntity
 import com.example.data.booking.AppDatabase
+import com.example.data.core.AlphaCoreEngine
 import com.example.data.firebase.FirebaseConfigHelper
+import com.example.data.incident.EmergencyLocationEngine
+import com.example.data.incident.GpsCoordinates
 import com.example.data.notifications.SmartNotificationHub
 import com.example.utils.ResidentNotificationManager
 import com.google.firebase.messaging.FirebaseMessaging
@@ -41,6 +44,8 @@ object FcmNotificationManager {
     private const val KEY_FCM_TOKEN = "key_fcm_token"
     private const val KEY_SUBSCRIBED_UNIT = "key_subscribed_unit"
 
+    const val TOPIC_SECURITY_EMERGENCY_ALERTS = "security_emergency_alerts"
+
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _fcmToken = MutableStateFlow<String?>(null)
@@ -58,8 +63,17 @@ object FcmNotificationManager {
     private val _recentNotificationsList = MutableStateFlow<List<VisitorCheckInFcmPayload>>(emptyList())
     val recentNotificationsList: StateFlow<List<VisitorCheckInFcmPayload>> = _recentNotificationsList.asStateFlow()
 
+    // Estado en tiempo real para Alertas Críticas de Emergencia S.O.S. recibidas vía FCM
+    private val _latestEmergencyAlert = MutableStateFlow<EmergencyAlertFcmPayload?>(null)
+    val latestEmergencyAlert: StateFlow<EmergencyAlertFcmPayload?> = _latestEmergencyAlert.asStateFlow()
+
+    private val _recentEmergencyAlertsList = MutableStateFlow<List<EmergencyAlertFcmPayload>>(emptyList())
+    val recentEmergencyAlertsList: StateFlow<List<EmergencyAlertFcmPayload>> = _recentEmergencyAlertsList.asStateFlow()
+
     private var activeListenerRegistration: ListenerRegistration? = null
+    private var activeEmergencyListenerRegistration: ListenerRegistration? = null
     private val notifiedFoliosCache = mutableSetOf<String>()
+    private val notifiedEmergencyFoliosCache = mutableSetOf<String>()
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -173,8 +187,32 @@ object FcmNotificationManager {
                     }
                 }
             }
+
+            // Si el usuario es Guardia, Supervisor o Admin, suscribirse a alertas de seguridad
+            if (user.alfhaRole.name == "GUARD" || user.alfhaRole.name == "GUARDIA" ||
+                user.alfhaRole.name == "SUPERVISOR" || user.alfhaRole.name == "ADMIN" || user.alfhaRole.name == "ADMINISTRADOR"
+            ) {
+                subscribeSecurityTopics(condominiumId)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "No se pudo suscribir a tópicos FCM: ${e.message}")
+        }
+    }
+
+    /**
+     * Suscribe el dispositivo del personal de seguridad a los tópicos de emergencia
+     */
+    fun subscribeSecurityTopics(condominiumId: String) {
+        try {
+            val securityTopic = "condo_${sanitizeTopic(condominiumId)}_security"
+            FirebaseMessaging.getInstance().subscribeToTopic(securityTopic).addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    Log.i(TAG, "🛡️ Suscrito a tópico FCM de Seguridad: $securityTopic")
+                }
+            }
+            FirebaseMessaging.getInstance().subscribeToTopic("security_emergency_alerts")
+        } catch (e: Exception) {
+            Log.w(TAG, "Error suscribiendo a tópicos de seguridad: ${e.message}")
         }
     }
 
@@ -461,8 +499,262 @@ object FcmNotificationManager {
         _recentNotificationsList.value = listOf(payload) + _recentNotificationsList.value.take(9)
     }
 
+    /**
+     * ENVÍO DE ALERTA DE EMERGENCIA VÍA FIREBASE CLOUD MESSAGING (FCM) A PERSONAL DE SEGURIDAD.
+     * Activado desde el botón de emergencia de la UI del residente.
+     * Incluye:
+     * - Número de unidad habitacional del residente (ej. "Casa 102")
+     * - Ubicación GPS (latitud, longitud, precisión) o estatus de ubicación por unidad
+     * - Tipo de emergencia (Pánico S.O.S., Médica, Intrusión, Incendio)
+     * - Transmisión en tiempo real vía FCM a guardias y supervisores
+     * - Persistencia atómica en Firestore, Room SQLite y Registro de Auditoría
+     */
+    suspend fun sendResidentEmergencyAlertFcm(
+        context: Context,
+        db: AppDatabase,
+        condominiumId: String,
+        residentUnit: String,
+        residentName: String,
+        residentId: String = "",
+        emergencyType: String = "PÁNICO S.O.S.",
+        details: String = "",
+        manualGps: GpsCoordinates? = null
+    ): Result<EmergencyAlertFcmPayload> = withContext(Dispatchers.IO) {
+        val cleanCondo = condominiumId.ifBlank { "Los Prados Residencial" }
+        val cleanUnit = residentUnit.ifBlank { "Unidad Sin Especificar" }
+        val now = System.currentTimeMillis()
+        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(now))
+
+        // 1. Obtención de Coordenadas GPS (o manuales provistas)
+        val gps = manualGps ?: EmergencyLocationEngine.captureCurrentGps(context)
+        val locationStatus = if (gps != null) EmergencyLocationEngine.STATUS_GPS_CAPTURED else EmergencyLocationEngine.STATUS_NO_GPS
+        val locationName = "$cleanUnit - $cleanCondo"
+        val mapsUrl = if (gps != null) "https://maps.google.com/?q=${gps.latitude},${gps.longitude}" else ""
+
+        val alertFolio = AlphaCoreEngine.generateUniqueFolio("EMG")
+        val notificationId = "FCM_EMG_${now}_${alertFolio.takeLast(6)}"
+        val securityTopic = "condo_${sanitizeTopic(cleanCondo)}_security"
+
+        val title = "🚨 ¡ALERTA DE EMERGENCIA - $cleanUnit! 🚨"
+        val body = "El residente $residentName de la unidad $cleanUnit activó $emergencyType a las $timeStr hrs. Coordenadas: ${if (gps != null) "${gps.latitude}, ${gps.longitude}" else "Ubicación en Unidad"}. Despachar auxilio inmediato."
+
+        val payload = EmergencyAlertFcmPayload(
+            type = "RESIDENT_EMERGENCY_ALERT",
+            event = "PANIC_SOS",
+            alertFolio = alertFolio,
+            residentId = residentId,
+            residentName = residentName,
+            residentUnit = cleanUnit,
+            condominiumId = cleanCondo,
+            emergencyType = emergencyType,
+            details = details.ifBlank { "Alerta activada desde el Botón de Emergencia S.O.S. en la UI del residente." },
+            latitude = gps?.latitude,
+            longitude = gps?.longitude,
+            gpsAccuracyMeters = gps?.accuracyMeters,
+            locationStatus = locationStatus,
+            locationName = locationName,
+            mapsUrl = mapsUrl,
+            timestampMillis = now,
+            priority = "CRITICA",
+            status = "ACTIVA",
+            title = title,
+            body = body,
+            requiresAck = true
+        )
+
+        // 2. Persistir en Firestore bajo `condominiums/{condo}/emergency_alerts`
+        try {
+            val firestore = FirebaseConfigHelper.getFirestore()
+            if (firestore != null) {
+                // Colección directa de alertas de emergencia
+                firestore.collection("condominiums")
+                    .document(cleanCondo)
+                    .collection("emergency_alerts")
+                    .document(alertFolio)
+                    .set(payload.toMap())
+                    .addOnSuccessListener {
+                        Log.i(TAG, "☁️ Alerta de emergencia publicada en Firestore emergency_alerts: $alertFolio")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.w(TAG, "Advertencia: Falló guardado en emergency_alerts: ${e.message}")
+                    }
+
+                // Colección de alertas de seguridad del condominio
+                firestore.collection("condominiums")
+                    .document(cleanCondo)
+                    .collection("security_alerts")
+                    .document(alertFolio)
+                    .set(payload.toMap())
+
+                // 3. Encolar en FCM Outbox para despacho a personal de seguridad (Guardias de Caseta y Supervisores)
+                val fcmOutboxDoc = mapOf(
+                    "notificationId" to notificationId,
+                    "targetTopic" to securityTopic,
+                    "targetRole" to "GUARD",
+                    "residentUnit" to cleanUnit,
+                    "condominiumId" to cleanCondo,
+                    "notification" to mapOf(
+                        "title" to title,
+                        "body" to body
+                    ),
+                    "data" to payload.toMap(),
+                    "priority" to "HIGH",
+                    "status" to "QUEUED",
+                    "createdAt" to now
+                )
+
+                firestore.collection("condominiums")
+                    .document(cleanCondo)
+                    .collection("fcm_outbox")
+                    .document(notificationId)
+                    .set(fcmOutboxDoc)
+                    .addOnSuccessListener {
+                        Log.i(TAG, "🚀 Alerta FCM encolada en Outbox para tópicos de seguridad: $securityTopic")
+                    }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error persistiendo alerta de emergencia en Firestore: ${e.message}")
+        }
+
+        // 4. Registrar en Room SQLite, Auditoría Inmutable y SmartNotificationHub
+        try {
+            EmergencyLocationEngine.triggerEmergencyAlert(
+                context = context,
+                db = db,
+                emergencyType = emergencyType,
+                locationName = locationName,
+                reportedBy = residentName,
+                reportedByRole = "RESIDENTE",
+                details = "Unidad: $cleanUnit. $details",
+                manualGps = gps
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error registrando emergencia en EmergencyLocationEngine: ${e.message}")
+        }
+
+        // 5. Despachar notificación local del sistema y actualizar estado
+        try {
+            ResidentNotificationManager.notifySecurityEmergencyAlert(context, payload)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error en notificación local de emergencia: ${e.message}")
+        }
+
+        _latestEmergencyAlert.value = payload
+        _recentEmergencyAlertsList.value = listOf(payload) + _recentEmergencyAlertsList.value.take(9)
+
+        return@withContext Result.success(payload)
+    }
+
+    /**
+     * Inicia escucha reactiva en Firestore para que el personal de seguridad (en Caseta o Supervisor)
+     * reciba en milisegundos cualquier alerta de emergencia activada por residentes.
+     */
+    fun startRealtimeSecurityEmergencyListener(context: Context, condominiumId: String) {
+        val firestore = FirebaseConfigHelper.getFirestore() ?: return
+        val cleanCondo = condominiumId.ifBlank { "Los Prados Residencial" }
+
+        activeEmergencyListenerRegistration?.remove()
+
+        try {
+            Log.i(TAG, "🛰️ Iniciando escucha en tiempo real de alertas de emergencia para personal de seguridad en $cleanCondo")
+            val query = firestore.collection("condominiums")
+                .document(cleanCondo)
+                .collection("emergency_alerts")
+                .whereEqualTo("status", "ACTIVA")
+                .orderBy("timestampMillis", Query.Direction.DESCENDING)
+                .limit(5)
+
+            activeEmergencyListenerRegistration = query.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Error en listener de emergencias de seguridad: ${error.message}")
+                    return@addSnapshotListener
+                }
+
+                if (snapshot == null || snapshot.isEmpty) return@addSnapshotListener
+
+                val alerts = mutableListOf<EmergencyAlertFcmPayload>()
+                val now = System.currentTimeMillis()
+
+                for (doc in snapshot.documents) {
+                    val data = doc.data ?: continue
+                    val payload = EmergencyAlertFcmPayload.fromMap(data)
+                    alerts.add(payload)
+
+                    // Si la alerta es reciente (últimos 3 minutos) y no se ha notificado localmente
+                    val isRecent = (now - payload.timestampMillis) < (3 * 60 * 1000)
+                    val cacheKey = "${payload.alertFolio}_${payload.timestampMillis}"
+
+                    if (isRecent && !notifiedEmergencyFoliosCache.contains(cacheKey)) {
+                        notifiedEmergencyFoliosCache.add(cacheKey)
+                        Log.i(TAG, "🚨 ¡NUEVA ALERTA DE EMERGENCIA DETECTADA! Unidad: ${payload.residentUnit} - Tipo: ${payload.emergencyType}")
+
+                        _latestEmergencyAlert.value = payload
+
+                        // Disparar alarma sonora y heads-up notification para personal de seguridad
+                        ResidentNotificationManager.notifySecurityEmergencyAlert(context, payload)
+                    }
+                }
+
+                _recentEmergencyAlertsList.value = alerts
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error iniciando listener de alertas de seguridad: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Notifica cuando llega una alerta FCM de emergencia
+     */
+    fun notifyEmergencyAlertReceivedLocally(payload: EmergencyAlertFcmPayload) {
+        _latestEmergencyAlert.value = payload
+        _recentEmergencyAlertsList.value = listOf(payload) + _recentEmergencyAlertsList.value.take(9)
+    }
+
+    /**
+     * Limpia la alerta activa en la interfaz
+     */
+    fun clearActiveEmergencyAlert() {
+        _latestEmergencyAlert.value = null
+    }
+
+    /**
+     * Resuelve o desactiva una alerta en Firestore
+     */
+    suspend fun resolveEmergencyAlert(
+        condominiumId: String,
+        alertFolio: String,
+        resolvedBy: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val firestore = FirebaseConfigHelper.getFirestore() ?: return@withContext false
+            val cleanCondo = condominiumId.ifBlank { "Los Prados Residencial" }
+
+            val updateMap = mapOf(
+                "status" to "RESUELTA",
+                "resolvedBy" to resolvedBy,
+                "resolvedAtMillis" to System.currentTimeMillis()
+            )
+
+            firestore.collection("condominiums")
+                .document(cleanCondo)
+                .collection("emergency_alerts")
+                .document(alertFolio)
+                .update(updateMap)
+
+            if (_latestEmergencyAlert.value?.alertFolio == alertFolio) {
+                _latestEmergencyAlert.value = null
+            }
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Error resolviendo alerta de emergencia en Firestore: ${e.message}")
+            false
+        }
+    }
+
     fun stopListener() {
         activeListenerRegistration?.remove()
         activeListenerRegistration = null
+        activeEmergencyListenerRegistration?.remove()
+        activeEmergencyListenerRegistration = null
     }
 }

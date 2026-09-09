@@ -103,6 +103,8 @@ import com.example.ui.components.BrandPhilosophyDialog
 import com.example.ui.components.BrandSplashScreen
 import com.example.ui.components.CameraScannerView
 import com.example.ui.components.PanicAlertEvent
+import com.example.ui.components.UnitLocation
+import com.example.ui.components.SampleCondoUnits
 import com.example.ui.components.IncidentCenterHub
 import com.example.ui.components.PanicFloorPlanCard
 import com.example.ui.components.PulsingPanicButton
@@ -137,6 +139,9 @@ import com.example.ui.theme.TextMuted
 import com.example.utils.ResidentNotificationManager
 import com.example.data.fcm.FcmNotificationManager
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 enum class ActiveScreenTab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     RESIDENT_DASHBOARD("00 Mi Residencia", Icons.Default.AccountCircle),
@@ -191,6 +196,38 @@ fun SecurityScannerScreen() {
     var showFirebaseCloudDialog by remember { mutableStateOf(false) }
     var showSplash by remember { mutableStateOf(false) }
     var showPhilosophyDialog by remember { mutableStateOf(false) }
+
+    // Sincronización en tiempo real de emergencias enviadas vía Firebase Cloud Messaging (FCM)
+    val latestFcmEmergency by FcmNotificationManager.latestEmergencyAlert.collectAsState()
+
+    LaunchedEffect(Unit) {
+        FcmNotificationManager.startRealtimeSecurityEmergencyListener(context, "Los Prados Residencial")
+    }
+
+    LaunchedEffect(latestFcmEmergency) {
+        val alert = latestFcmEmergency
+        if (alert != null && alert.status == "ACTIVA") {
+            val matchedUnit = SampleCondoUnits.units.find {
+                it.unitId.contains(alert.residentUnit, ignoreCase = true) || alert.residentUnit.contains(it.unitId, ignoreCase = true)
+            } ?: UnitLocation(
+                unitId = alert.residentUnit,
+                residentName = alert.residentName,
+                blockLabel = alert.locationName.ifBlank { "Unidad Habitacional" },
+                xRatio = 0.45f,
+                yRatio = 0.40f,
+                distanceMeters = 120
+            )
+
+            activePanicAlert = PanicAlertEvent(
+                id = alert.alertFolio,
+                unit = matchedUnit,
+                alertType = alert.emergencyType,
+                severity = "CRÍTICO",
+                timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(alert.timestampMillis)),
+                isResolved = false
+            )
+        }
+    }
 
     fun verifyPassCode(code: String) {
         triggerScanHaptic(context)
@@ -414,6 +451,7 @@ fun SecurityScannerScreen() {
                                 userRole = "GUARDIA",
                                 onEmergencyResolvedOrClosed = {
                                     activePanicAlert = null
+                                    FcmNotificationManager.clearActiveEmergencyAlert()
                                 }
                             )
                             Spacer(modifier = Modifier.height(8.dp))

@@ -57,8 +57,39 @@ class MedusaFirebaseMessagingService : FirebaseMessagingService() {
         val data = remoteMessage.data
         val notification = remoteMessage.notification
 
-        // Extraer campos estructurados del mensaje de escaneo de visita
         val messageType = data["type"] ?: "VISITOR_QR_SCANNED"
+
+        // CASO A: Alerta Crítica de Emergencia S.O.S. enviada por un residente a seguridad
+        if (messageType == "RESIDENT_EMERGENCY_ALERT" || data["event"] == "PANIC_SOS") {
+            val emergencyPayload = EmergencyAlertFcmPayload.fromMap(data)
+            Log.i(TAG, "🚨 Mensaje FCM de Emergencia S.O.S. recibido! Folio: ${emergencyPayload.alertFolio}, Unidad: ${emergencyPayload.residentUnit}")
+
+            // Actualizar estado en memoria
+            FcmNotificationManager.notifyEmergencyAlertReceivedLocally(emergencyPayload)
+
+            // Mostrar notificación crítica con sirena
+            displayEmergencySystemNotification(emergencyPayload)
+
+            // Persistir en SQLite Room
+            serviceScope.launch {
+                try {
+                    val db = AppDatabase.getDatabase(applicationContext)
+                    SmartNotificationHub.notifyGuardCriticalAlert(
+                        context = applicationContext,
+                        db = db,
+                        alertFolio = emergencyPayload.alertFolio,
+                        location = "${emergencyPayload.residentUnit} • ${emergencyPayload.locationName}",
+                        description = "Alerta de ${emergencyPayload.emergencyType} activada por residente ${emergencyPayload.residentName}",
+                        actionRequired = "Despachar personal de seguridad de forma inmediata a la unidad"
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error persistiendo alerta de emergencia FCM en Room: ${e.message}")
+                }
+            }
+            return
+        }
+
+        // CASO B: Mensaje de confirmación de escaneo de visita en garita
         val guestName = data["guestName"] ?: notification?.title?.replace("🔔 ¡Tu Visita ha Ingresado!", "")?.trim() ?: "Visita Autorizada"
         val unitId = data["targetUnitId"] ?: data["destinationHouse"] ?: ""
         val hostResidentName = data["hostResidentName"] ?: "Estimado Residente"
@@ -177,6 +208,15 @@ class MedusaFirebaseMessagingService : FirebaseMessagingService() {
             Log.i(TAG, "🔔 Notificación del sistema disparada con éxito para visita: ${payload.guestName}")
         } catch (e: Exception) {
             Log.e(TAG, "Error mostrando notificación FCM: ${e.message}", e)
+        }
+    }
+
+    private fun displayEmergencySystemNotification(payload: EmergencyAlertFcmPayload) {
+        try {
+            ResidentNotificationManager.notifySecurityEmergencyAlert(applicationContext, payload)
+            Log.i(TAG, "🚨 Notificación crítica de emergencia disparada para unidad: ${payload.residentUnit}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error mostrando notificación crítica de emergencia: ${e.message}", e)
         }
     }
 }

@@ -280,6 +280,7 @@ suspend fun createAndStoreTimeLimitedToken(
     val fs = FirebaseConfigHelper.getFirestore()
     if (fs != null) {
         try {
+            FirestoreTenantManager.saveQrPass(fs, condominiumId, qrPassEntity)
             val firestoreLog = FirestoreVisitorLog.fromVisitorCheckIn(finalCheckIn, condominiumId)
             FirestoreTenantManager.saveVisitorLog(fs, condominiumId, firestoreLog)
             FirestoreTenantManager.saveVisitorCheckIn(fs, condominiumId, finalCheckIn)

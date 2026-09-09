@@ -21,6 +21,10 @@ object ResidentNotificationManager {
     private const val CHANNEL_NAME = "Alertas de Ingreso de Visitas"
     private const val CHANNEL_DESC = "Notificaciones automáticas para residentes cuando su visita ingresa por garita"
 
+    const val EMERGENCY_CHANNEL_ID = "security_emergency_sos_channel"
+    private const val EMERGENCY_CHANNEL_NAME = "🚨 Alertas Críticas de Emergencia S.O.S."
+    private const val EMERGENCY_CHANNEL_DESC = "Alertas de máxima prioridad enviadas por residentes a personal de seguridad con ubicación GPS"
+
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -36,6 +40,27 @@ object ResidentNotificationManager {
             }
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             notificationManager?.createNotificationChannel(channel)
+        }
+        createEmergencyNotificationChannel(context)
+    }
+
+    fun createEmergencyNotificationChannel(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val emgChannel = NotificationChannel(
+                EMERGENCY_CHANNEL_ID,
+                EMERGENCY_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = EMERGENCY_CHANNEL_DESC
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 800)
+                enableLights(true)
+                lightColor = android.graphics.Color.RED
+                setShowBadge(true)
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
+            }
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.createNotificationChannel(emgChannel)
         }
     }
 
@@ -321,6 +346,70 @@ object ResidentNotificationManager {
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
+            .build()
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.notify(notificationId, notification)
+    }
+
+    fun notifySecurityEmergencyAlert(
+        context: Context,
+        payload: com.example.data.fcm.EmergencyAlertFcmPayload
+    ) {
+        createEmergencyNotificationChannel(context)
+        val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "SECURITY_SCANNER")
+            putExtra("EXTRA_NOTIFICATION_TYPE", "RESIDENT_EMERGENCY_ALERT")
+            putExtra("EMERGENCY_FOLIO", payload.alertFolio)
+            putExtra("RESIDENT_UNIT", payload.residentUnit)
+            putExtra("RESIDENT_NAME", payload.residentName)
+            putExtra("EMERGENCY_TYPE", payload.emergencyType)
+            putExtra("LATITUDE", payload.latitude ?: 0.0)
+            putExtra("LONGITUDE", payload.longitude ?: 0.0)
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(payload.timestampMillis))
+        val coordsStr = if (payload.latitude != null && payload.longitude != null) {
+            "Lat: ${String.format(Locale.US, "%.5f", payload.latitude)}, Lon: ${String.format(Locale.US, "%.5f", payload.longitude)} (±${payload.gpsAccuracyMeters?.toInt() ?: 15}m)"
+        } else {
+            "Ubicación por Padrón de Unidad Habitacional"
+        }
+
+        val bigText = """
+            🚨 ALERTA CRÍTICA DE EMERGENCIA
+            • Unidad Habitacional: ${payload.residentUnit}
+            • Residente: ${payload.residentName}
+            • Tipo: ${payload.emergencyType}
+            • Ubicación: $coordsStr
+            • Estatus GPS: ${payload.locationStatus}
+            • Hora: $timeStr hrs
+            • Folio de Auditoría: ${payload.alertFolio}
+            ${if (payload.details.isNotBlank()) "• Detalle: ${payload.details}" else ""}
+            
+            ⚠️ ACCIÓN REQUERIDA: Despachar patrulla táctica de inmediato a ${payload.residentUnit}.
+        """.trimIndent()
+
+        val notification = NotificationCompat.Builder(context, EMERGENCY_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle("🚨 ¡EMERGENCIA EN ${payload.residentUnit}! - ${payload.emergencyType}")
+            .setContentText("Residente ${payload.residentName} solicita auxilio en ${payload.residentUnit} ($coordsStr)")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setVibrate(longArrayOf(0, 500, 200, 500, 200, 800))
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager

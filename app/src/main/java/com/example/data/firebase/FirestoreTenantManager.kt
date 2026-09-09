@@ -286,6 +286,44 @@ object FirestoreTenantManager {
     }
 
     /**
+     * Registra el timestamp de salida (checkOutTimestamp) y marca status como "DEPARTED"
+     * directamente en Firestore (/condominiums/{condoId}/visitor_logs/{folio}).
+     */
+    suspend fun recordVisitorExitInFirestore(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        folio: String,
+        checkOutTimestamp: Timestamp = Timestamp.now(),
+        guardNotes: String? = null
+    ): Result<Unit> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            val subcollectionLogs = getTenantSubcollection(firestore, validId, SUB_VISITOR_LOGS)
+            val subcollectionAccess = getTenantSubcollection(firestore, validId, SUB_VISITOR_ACCESS)
+
+            val millis = checkOutTimestamp.toDate().time
+            val updates = mutableMapOf<String, Any>(
+                "status" to "DEPARTED",
+                "checkOutTimestamp" to checkOutTimestamp,
+                "checkOutMillis" to millis,
+                "syncedAtMillis" to System.currentTimeMillis()
+            )
+            if (!guardNotes.isNullOrBlank()) {
+                updates["guardNotes"] = guardNotes
+            }
+
+            subcollectionLogs.document(folio).set(updates, SetOptions.merge()).await()
+            subcollectionAccess.document(folio).set(updates, SetOptions.merge()).await()
+
+            Log.i(TAG, "[$validId] Salida registrada en Firestore para folio $folio a las ${checkOutTimestamp.toDate()}")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error registrando salida de visitante en Firestore: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Guarda un Pase QR generado por residentes o administración con aislamiento de condominio.
      */
     suspend fun saveQrPass(
@@ -334,6 +372,33 @@ object FirestoreTenantManager {
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "Error guardando pase QR con aislamiento: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Revoca o desactiva un Pase QR temporal en Firestore asegurando el aislamiento del condominio.
+     */
+    suspend fun revokeQrPass(
+        firestore: FirebaseFirestore,
+        condominiumId: String,
+        passCode: String,
+        reason: String = "Revocado por el residente"
+    ): Result<Unit> {
+        return try {
+            val validId = validateCondominiumId(condominiumId)
+            val subcollection = getTenantSubcollection(firestore, validId, SUB_QR_PASSES)
+            subcollection.document(passCode).update(
+                mapOf(
+                    "isActive" to false,
+                    "revokedAtMillis" to System.currentTimeMillis(),
+                    "revocationReason" to reason
+                )
+            ).await()
+            Log.i(TAG, "[$validId] Pase QR $passCode revocado en Firestore.")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error revocando pase QR $passCode en Firestore: ${e.message}")
             Result.failure(e)
         }
     }

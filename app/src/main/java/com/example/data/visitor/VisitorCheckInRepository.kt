@@ -81,6 +81,54 @@ class VisitorCheckInRepository(
     }
 
     /**
+     * Registra la salida de un visitante por su Folio irrepetible, actualizando
+     * el timestamp de egreso (checkOutTimestamp / checkOutMillis) tanto en Room DB como en Firestore.
+     */
+    suspend fun registerCheckOutByFolio(
+        folio: String,
+        notes: String? = "Salida confirmada por administración"
+    ): Result<VisitorCheckIn> = withContext(Dispatchers.IO) {
+        try {
+            val checkIn = visitorCheckInDao.getCheckInByFolio(folio)
+                ?: return@withContext Result.failure(Exception("Registro no encontrado para folio $folio"))
+
+            val now = System.currentTimeMillis()
+            val updatedNotes = if (notes.isNullOrBlank()) checkIn.guardNotes else {
+                "${checkIn.guardNotes ?: ""}\n[Salida]: $notes".trim()
+            }
+            val updated = checkIn.copy(
+                status = "DEPARTED",
+                checkOutMillis = now,
+                guardNotes = updatedNotes
+            )
+
+            visitorCheckInDao.insertCheckIn(updated)
+
+            // Sincronizar en Firestore con timestamp nativo de salida
+            val fs = FirebaseConfigHelper.getFirestore()
+            if (fs != null) {
+                try {
+                    FirestoreTenantManager.recordVisitorExitInFirestore(
+                        firestore = fs,
+                        condominiumId = activeCondominiumId,
+                        folio = folio,
+                        checkOutTimestamp = com.google.firebase.Timestamp(java.util.Date(now)),
+                        guardNotes = updatedNotes
+                    )
+                    FirestoreTenantManager.saveVisitorCheckIn(fs, activeCondominiumId, updated)
+                } catch (e: Exception) {
+                    Log.w("VisitorCheckInRepo", "Fallo al sincronizar salida en Firestore: ${e.message}")
+                }
+            }
+
+            Result.success(updated)
+        } catch (e: Exception) {
+            Log.e("VisitorCheckInRepo", "Error al registrar salida por folio $folio: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Registra un nuevo invitado por parte del residente o guardia y lo persiste
      * directamente en Firestore (/condominiums/{condoId}/visitor_logs) y en Room DB.
      */

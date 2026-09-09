@@ -57,6 +57,10 @@ import com.example.utils.AmenityReminderManager
 import com.example.scanner.PassType
 import com.example.ui.components.AmenityCalendarView
 import com.example.ui.components.GenerateTimedTokenDialog
+import com.example.ui.components.ResidentTemporaryAccessQrHubDialog
+import com.example.ui.components.ResidentEmergencyTopBarButton
+import com.example.ui.components.ResidentEmergencyBannerCard
+import com.example.ui.components.ResidentEmergencyDialog
 import com.example.ui.components.TimeLimitedDigitalPassModal
 import com.example.ui.components.TimedTokenStatusBadge
 import com.example.ui.components.VisitorAccessTokenInfo
@@ -101,6 +105,7 @@ fun ResidentDashboardScreen(
     var bookingToCancel by remember { mutableStateOf<AmenityBooking?>(null) }
     var showUserSwitcherDialog by remember { mutableStateOf(false) }
     var showAuditDetailsDialog by remember { mutableStateOf(false) }
+    var showEmergencyDialog by remember { mutableStateOf(false) }
     var customFirebaseUid by remember { mutableStateOf<String?>(null) }
     var customFirebaseEmail by remember { mutableStateOf<String?>(null) }
 
@@ -206,6 +211,9 @@ fun ResidentDashboardScreen(
                             tint = CyanNeon
                         )
                     }
+                    ResidentEmergencyTopBarButton(
+                        onClick = { showEmergencyDialog = true }
+                    )
                 }
             )
         },
@@ -236,6 +244,15 @@ fun ResidentDashboardScreen(
                         onDismiss = { dismissedBannerFolio = lastFcmPayload?.passFolio }
                     )
                 }
+            }
+
+            // Botón y Banner de Emergencia S.O.S. con Transmisión Inmediata vía FCM
+            item {
+                ResidentEmergencyBannerCard(
+                    residentUnit = currentUser.unitOrDepartment.ifBlank { "Casa 102" },
+                    condominiumName = "Residencial Los Prados",
+                    onOpenEmergencyDialog = { showEmergencyDialog = true }
+                )
             }
 
             // 1. Tarjeta de Identidad y Aislamiento del Residente
@@ -629,21 +646,41 @@ fun ResidentDashboardScreen(
         )
     }
 
-    // Diálogo interactivo para generar Token Temporal Único con QR
+    // Utilidad interactiva para generar Códigos QR de Acceso Temporal con guardado en Firestore
     if (showNewQrDialog) {
-        GenerateTimedTokenDialog(
+        ResidentTemporaryAccessQrHubDialog(
             db = db,
             condominiumId = condominiumId,
-            defaultUnit = currentUser.unitOrDepartment,
-            defaultHost = currentUser.name,
-            onDismiss = { showNewQrDialog = false },
-            onTokenCreated = { token ->
+            condominiumName = "Residencial Los Prados",
+            residentUnit = currentUser.unitOrDepartment,
+            residentName = currentUser.name,
+            residentUid = state.firebaseAuthUid,
+            onDismiss = {
+                showNewQrDialog = false
+                refreshData()
+            },
+            onSimulateScanInCaseta = { code: String ->
                 showNewQrDialog = false
                 refreshData()
                 scope.launch {
-                    val pass = db.qrPassDao().getPassByCode(token.passCode)
+                    val pass = db.qrPassDao().getPassByCode(code)
                     selectedQrPassForDetail = pass
                 }
+            }
+        )
+    }
+
+    // Modal de Emergencia S.O.S. con despacho FCM a Seguridad
+    if (showEmergencyDialog) {
+        ResidentEmergencyDialog(
+            residentUnit = currentUser.unitOrDepartment.ifBlank { "Casa 102" },
+            residentName = currentUser.name.ifBlank { "Residente" },
+            residentId = currentUser.id,
+            condominiumName = "Residencial Los Prados",
+            db = db,
+            onDismiss = {
+                showEmergencyDialog = false
+                refreshData()
             }
         )
     }

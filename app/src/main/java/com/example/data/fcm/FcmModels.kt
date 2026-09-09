@@ -107,3 +107,93 @@ data class FcmDeviceRegistration(
         )
     }
 }
+
+/**
+ * Modelo de datos para Notificación de Emergencia / Pánico enviada vía Firebase Cloud Messaging (FCM)
+ * desde el dispositivo del residente hacia el personal de seguridad (Guardias de Caseta, Supervisores Tácticos).
+ * Incluye número de unidad del residente, ubicación GPS, tipo de emergencia y sellado de tiempo.
+ */
+data class EmergencyAlertFcmPayload(
+    val type: String = "RESIDENT_EMERGENCY_ALERT",
+    val event: String = "PANIC_SOS",
+    val alertFolio: String = "",
+    val residentId: String = "",
+    val residentName: String = "",
+    val residentUnit: String = "",
+    val condominiumId: String = "Los Prados Residencial",
+    val emergencyType: String = "PÁNICO S.O.S.",
+    val details: String = "",
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val gpsAccuracyMeters: Float? = null,
+    val locationStatus: String = "GPS_CAPTURADO",
+    val locationName: String = "",
+    val mapsUrl: String = "",
+    val timestampMillis: Long = System.currentTimeMillis(),
+    val priority: String = "CRITICA",
+    val status: String = "ACTIVA",
+    val title: String = "🚨 ¡ALERTA DE EMERGENCIA - UNIDAD %s! 🚨",
+    val body: String = "",
+    val requiresAck: Boolean = true
+) {
+    fun toMap(): Map<String, Any?> {
+        return mapOf(
+            "type" to type,
+            "event" to event,
+            "alertFolio" to alertFolio,
+            "residentId" to residentId,
+            "residentName" to residentName,
+            "residentUnit" to residentUnit,
+            "condominiumId" to condominiumId,
+            "emergencyType" to emergencyType,
+            "details" to details,
+            "latitude" to (latitude ?: 0.0),
+            "longitude" to (longitude ?: 0.0),
+            "gpsAccuracyMeters" to (gpsAccuracyMeters ?: 0f),
+            "locationStatus" to locationStatus,
+            "locationName" to locationName,
+            "mapsUrl" to mapsUrl,
+            "timestampMillis" to timestampMillis,
+            "priority" to priority,
+            "status" to status,
+            "title" to title,
+            "body" to body,
+            "requiresAck" to requiresAck
+        )
+    }
+
+    companion object {
+        fun fromMap(map: Map<String, Any?>): EmergencyAlertFcmPayload {
+            val latNum = map["latitude"] as? Number
+            val lonNum = map["longitude"] as? Number
+            val accNum = map["gpsAccuracyMeters"] as? Number
+            val timeNum = map["timestampMillis"] as? Number
+            val unit = map["residentUnit"] as? String ?: ""
+
+            return EmergencyAlertFcmPayload(
+                type = map["type"] as? String ?: "RESIDENT_EMERGENCY_ALERT",
+                event = map["event"] as? String ?: "PANIC_SOS",
+                alertFolio = map["alertFolio"] as? String ?: "",
+                residentId = map["residentId"] as? String ?: "",
+                residentName = map["residentName"] as? String ?: "Residente",
+                residentUnit = unit,
+                condominiumId = map["condominiumId"] as? String ?: "Los Prados Residencial",
+                emergencyType = map["emergencyType"] as? String ?: "PÁNICO S.O.S.",
+                details = map["details"] as? String ?: "",
+                latitude = latNum?.toDouble()?.takeIf { it != 0.0 },
+                longitude = lonNum?.toDouble()?.takeIf { it != 0.0 },
+                gpsAccuracyMeters = accNum?.toFloat()?.takeIf { it != 0f },
+                locationStatus = map["locationStatus"] as? String ?: "GPS_CAPTURADO",
+                locationName = map["locationName"] as? String ?: unit,
+                mapsUrl = map["mapsUrl"] as? String ?: "",
+                timestampMillis = timeNum?.toLong() ?: System.currentTimeMillis(),
+                priority = map["priority"] as? String ?: "CRITICA",
+                status = map["status"] as? String ?: "ACTIVA",
+                title = map["title"] as? String ?: "🚨 ¡ALERTA DE EMERGENCIA - UNIDAD $unit! 🚨",
+                body = map["body"] as? String ?: "",
+                requiresAck = map["requiresAck"] as? Boolean ?: true
+            )
+        }
+    }
+}
+
