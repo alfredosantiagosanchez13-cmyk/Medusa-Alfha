@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -16,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,6 +36,7 @@ import com.example.auth.AlfhaRole
 import com.example.auth.AlfhaSecurityContext
 import com.example.data.booking.AppDatabase
 import com.example.data.resident.*
+import com.example.ui.screens.ActiveScreenTab
 import com.example.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -95,6 +98,8 @@ fun ResidentManagementHub(
     db: AppDatabase,
     modifier: Modifier = Modifier,
     filterUnitId: String? = null,
+    onBack: (() -> Unit)? = null,
+    onNavigateToTab: ((ActiveScreenTab) -> Unit)? = null,
     onNavigateToQrGenerator: ((unitId: String, residentName: String) -> Unit)? = null,
     onNavigateToPackages: ((unitId: String, residentName: String) -> Unit)? = null,
     onNavigateToBookings: ((unitId: String) -> Unit)? = null
@@ -102,6 +107,13 @@ fun ResidentManagementHub(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val currentUser by AlfhaSecurityContext.currentUser.collectAsState()
+
+    // Manejar el botón físico/gesto Atrás de Android para volver sin quedar atrapado
+    if (onBack != null) {
+        BackHandler(enabled = true) {
+            onBack()
+        }
+    }
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedTab by remember { mutableStateOf(ResidentFilterTab.TODOS) }
@@ -166,6 +178,73 @@ fun ResidentManagementHub(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
+        // --- BARRA SUPERIOR DE SALIDA / NAVEGACIÓN DIRECTA ---
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = NavySurface,
+            border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.35f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (onBack != null) {
+                    Button(
+                        onClick = onBack,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CyanNeon.copy(alpha = 0.15f),
+                            contentColor = CyanNeon
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Volver al Dashboard",
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("← Volver al Dashboard", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Default.People, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(18.dp))
+                        Text("MÓDULO DE RESIDENTES", color = CyanNeon, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                if (onNavigateToTab != null) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = { onNavigateToTab(ActiveScreenTab.DASHBOARD) },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldPrimary)
+                        ) {
+                            Text("01 Dashboard", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        OutlinedButton(
+                            onClick = { onNavigateToTab(ActiveScreenTab.CASETA) },
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.35f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                        ) {
+                            Text("02 Caseta", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+
         // --- CABECERA Y METRICAS ---
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -186,6 +265,22 @@ fun ResidentManagementHub(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (onBack != null) {
+                                IconButton(
+                                    onClick = onBack,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .background(NavySurface, CircleShape)
+                                        .border(1.dp, CyanNeon.copy(alpha = 0.5f), CircleShape)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Regresar",
+                                        tint = CyanNeon,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                             Icon(Icons.Default.HomeWork, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(22.dp))
                             Text(
                                 text = "DIRECTORIO DE RESIDENTES & UNIDADES",

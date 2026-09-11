@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -15,12 +16,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -240,6 +243,11 @@ fun SecurityScannerScreen(
         }
     }
 
+    // Manejo de navegación Atrás de Android para volver siempre al Dashboard y evitar quedar atrapado en subpantallas
+    BackHandler(enabled = currentTab != ActiveScreenTab.DASHBOARD) {
+        currentTab = ActiveScreenTab.DASHBOARD
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = NavyDark,
@@ -247,12 +255,21 @@ fun SecurityScannerScreen(
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .testTag("main_bottom_navigation"),
                     color = NavySurface,
                     tonalElevation = 8.dp,
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
                 ) {
+                    val bottomNavState = rememberLazyListState()
+                    LaunchedEffect(currentTab) {
+                        val tabIndex = ActiveScreenTab.values().indexOf(currentTab)
+                        if (tabIndex >= 0) {
+                            bottomNavState.animateScrollToItem(tabIndex)
+                        }
+                    }
                     androidx.compose.foundation.lazy.LazyRow(
+                        state = bottomNavState,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 6.dp, vertical = 6.dp),
@@ -520,6 +537,8 @@ fun SecurityScannerScreen(
                 ActiveScreenTab.RESIDENTS -> {
                     ResidentManagementHub(
                         db = db,
+                        onBack = { currentTab = ActiveScreenTab.DASHBOARD },
+                        onNavigateToTab = { currentTab = it },
                         onNavigateToQrGenerator = { unit, resident ->
                             currentTab = ActiveScreenTab.GENERATOR
                         },
