@@ -18,7 +18,7 @@ data class ParsedQrPass(
 object QrPayloadParser {
 
     private val jsonKeyRegexes = listOf(
-        "passCode", "code", "entryCode", "folio", "id"
+        "passCode", "code", "entryCode", "folio", "id", "residentId", "token"
     )
 
     private fun extractJsonField(json: String, key: String): String? {
@@ -86,16 +86,44 @@ object QrPayloadParser {
         val extractedCode = extractEntryCode(trimmed)
 
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-            val guest = extractJsonField(trimmed, "guestName")
-                ?: extractJsonField(trimmed, "visitorName")
+            val typeVal = extractJsonField(trimmed, "type")
+            val isResVal = extractJsonField(trimmed, "isResident")
+            val roleVal = extractJsonField(trimmed, "role")
+            val touchlessVal = extractJsonField(trimmed, "touchless")
+
+            val isResident = typeVal.equals("RESIDENT", ignoreCase = true) ||
+                    typeVal.equals("RESIDENTE", ignoreCase = true) ||
+                    isResVal.equals("true", ignoreCase = true) ||
+                    roleVal.equals("RESIDENT", ignoreCase = true) ||
+                    roleVal.equals("RESIDENTE", ignoreCase = true) ||
+                    touchlessVal.equals("true", ignoreCase = true) ||
+                    extractedCode.startsWith("RES-", ignoreCase = true) ||
+                    extractedCode.startsWith("TOUCHLESS-", ignoreCase = true) ||
+                    extractedCode.startsWith("MEDUSA-RESIDENT-", ignoreCase = true)
+
+            val guest = if (isResident) {
+                extractJsonField(trimmed, "residentName")
+                    ?: extractJsonField(trimmed, "guestName")
+                    ?: extractJsonField(trimmed, "visitorName")
+                    ?: extractJsonField(trimmed, "name")
+            } else {
+                extractJsonField(trimmed, "guestName")
+                    ?: extractJsonField(trimmed, "visitorName")
+                    ?: extractJsonField(trimmed, "name")
+                    ?: extractJsonField(trimmed, "residentName")
+            }
             val destination = extractJsonField(trimmed, "destinationHouse")
                 ?: extractJsonField(trimmed, "unitId")
+                ?: extractJsonField(trimmed, "unit")
                 ?: extractJsonField(trimmed, "house")
             val host = extractJsonField(trimmed, "hostResidentName")
-                ?: extractJsonField(trimmed, "residentName")
+                ?: if (!isResident) extractJsonField(trimmed, "residentName") else null
+                ?: guest
             val plate = extractJsonField(trimmed, "vehiclePlate")
+                ?: extractJsonField(trimmed, "plates")
                 ?: extractJsonField(trimmed, "plate")
             val type = extractJsonField(trimmed, "passType")
+                ?: if (isResident) "RESIDENT_PERMANENT" else null
 
             return ParsedQrPass(
                 passCode = extractedCode,

@@ -2,7 +2,11 @@ package com.example.ui.components
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -81,6 +85,8 @@ fun ResidentTemporaryAccessQrHubDialog(
     var durationHours by remember { mutableIntStateOf(4) }
     var isSingleEntry by remember { mutableStateOf(true) }
     var residentNotes by remember { mutableStateOf("") }
+    var attachedDocumentPath by remember { mutableStateOf<String?>(null) }
+    var attachedDocumentName by remember { mutableStateOf<String?>(null) }
 
     var isGenerating by remember { mutableStateOf(false) }
     var generatedPassResult by remember { mutableStateOf<TemporaryAccessPass?>(null) }
@@ -145,14 +151,17 @@ fun ResidentTemporaryAccessQrHubDialog(
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Black
                             )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 Text(
                                     text = "Casa: $residentUnit",
                                     color = CyanNeon,
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
                                     color = SuccessGreen.copy(alpha = 0.15f)
@@ -162,7 +171,9 @@ fun ResidentTemporaryAccessQrHubDialog(
                                         color = SuccessGreen,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
                             }
@@ -235,6 +246,7 @@ fun ResidentTemporaryAccessQrHubDialog(
                         pass = generatedPassResult!!,
                         qrBitmap = generatedQrBitmap,
                         condominiumName = condominiumName,
+                        attachedDocumentPath = attachedDocumentPath,
                         onNewPass = {
                             generatedPassResult = null
                             generatedQrBitmap = null
@@ -242,6 +254,8 @@ fun ResidentTemporaryAccessQrHubDialog(
                             visitorDocument = ""
                             vehiclePlate = ""
                             residentNotes = ""
+                            attachedDocumentPath = null
+                            attachedDocumentName = null
                         },
                         onSimulateScan = { code ->
                             onSimulateScanInCaseta(code)
@@ -256,6 +270,7 @@ fun ResidentTemporaryAccessQrHubDialog(
                         visitorDocument = visitorDocument,
                         onVisitorDocumentChange = { visitorDocument = it },
                         destinationUnit = destinationUnit,
+                        onDestinationUnitChange = { destinationUnit = it },
                         hostResidentName = hostResidentName,
                         selectedCategory = selectedCategory,
                         onSelectCategory = { selectedCategory = it },
@@ -269,16 +284,26 @@ fun ResidentTemporaryAccessQrHubDialog(
                         onIsSingleEntryChange = { isSingleEntry = it },
                         residentNotes = residentNotes,
                         onResidentNotesChange = { residentNotes = it },
+                        attachedDocumentPath = attachedDocumentPath,
+                        attachedDocumentName = attachedDocumentName,
+                        onAttachDocument = { path, name ->
+                            attachedDocumentPath = path
+                            attachedDocumentName = name
+                        },
                         isGenerating = isGenerating,
                         onGenerateClick = {
                             if (visitorName.isBlank()) {
-                                Toast.makeText(context, "Ingresa el nombre del visitante.", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Ingresa el nombre completo del visitante.", Toast.LENGTH_SHORT).show()
+                                return@CreateTemporaryPassForm
+                            }
+                            if (destinationUnit.isBlank()) {
+                                Toast.makeText(context, "Especifica la casa o unidad destino.", Toast.LENGTH_SHORT).show()
                                 return@CreateTemporaryPassForm
                             }
                             isGenerating = true
                             val passType = when (selectedCategory) {
-                                "Delivery / Envíos" -> PassType.DELIVERY_SERVICE
-                                "Técnico / Servicios" -> PassType.DELIVERY_SERVICE
+                                "Paquetería", "Delivery / Envíos" -> PassType.DELIVERY_SERVICE
+                                "Proveedor", "Técnico / Servicios" -> PassType.DELIVERY_SERVICE
                                 "Evento / Fiesta" -> PassType.EVENT_GUEST
                                 else -> if (isSingleEntry) PassType.VISITOR_SINGLE else PassType.RESIDENT_PERMANENT
                             }
@@ -290,7 +315,9 @@ fun ResidentTemporaryAccessQrHubDialog(
                                     db = db,
                                     condominiumId = condominiumId,
                                     visitorName = visitorName,
-                                    visitorDocument = visitorDocument,
+                                    visitorDocument = visitorDocument.ifBlank {
+                                        if (attachedDocumentPath != null) "INE/Doc Adjunto" else "Verificar en Caseta"
+                                    },
                                     destinationUnit = destinationUnit,
                                     hostResidentName = hostResidentName,
                                     passType = passType,
@@ -298,7 +325,8 @@ fun ResidentTemporaryAccessQrHubDialog(
                                     durationHours = durationHours,
                                     maxEntries = maxEntries,
                                     notes = residentNotes,
-                                    residentUid = residentUid
+                                    residentUid = residentUid,
+                                    documentPhotoUri = attachedDocumentPath
                                 )
 
                                 val bitmap = ResidentQrCodeUtility.generateQrBitmap(result.passCode, 512)
@@ -307,7 +335,7 @@ fun ResidentTemporaryAccessQrHubDialog(
                                 isGenerating = false
                                 Toast.makeText(
                                     context,
-                                    "✅ Pase temporal generado y guardado en Firestore.",
+                                    "✅ Pase temporal generado con éxito.",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -521,6 +549,7 @@ private fun CreateTemporaryPassForm(
     visitorDocument: String,
     onVisitorDocumentChange: (String) -> Unit,
     destinationUnit: String,
+    onDestinationUnitChange: (String) -> Unit,
     hostResidentName: String,
     selectedCategory: String,
     onSelectCategory: (String) -> Unit,
@@ -534,14 +563,45 @@ private fun CreateTemporaryPassForm(
     onIsSingleEntryChange: (Boolean) -> Unit,
     residentNotes: String,
     onResidentNotesChange: (String) -> Unit,
+    attachedDocumentPath: String?,
+    attachedDocumentName: String?,
+    onAttachDocument: (String?, String?) -> Unit,
     isGenerating: Boolean,
     onGenerateClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val scrollState = rememberScrollState()
 
+    // Launcher para seleccionar foto de identificación desde Galería / WhatsApp
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val localPath = com.example.utils.ImageCaptureHelper.copyUriToInternalStorage(context, uri, "doc_resident")
+            if (localPath != null) {
+                onAttachDocument(localPath, "INE / Identificación Oficial")
+                Toast.makeText(context, "✅ Identificación adjuntada con éxito", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // Launcher de respaldo para documentos (PDF / imágenes desde explorador)
+    val docPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val localPath = com.example.utils.ImageCaptureHelper.copyUriToInternalStorage(context, uri, "doc_resident")
+            if (localPath != null) {
+                onAttachDocument(localPath, "Documento INE / Pasaporte")
+                Toast.makeText(context, "✅ Documento cargado", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     val categories = listOf(
-        "Visita Familiar",
-        "Delivery / Envíos",
+        "Visita",
+        "Proveedor",
+        "Paquetería",
         "Técnico / Servicios",
         "Evento / Fiesta"
     )
@@ -556,13 +616,64 @@ private fun CreateTemporaryPassForm(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scrollState),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Campo: Nombre del Visitante
+        // 1. Selector de Tipo: Visita, Proveedor, Paquetería
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = "Tipo de Acceso *",
+                color = GoldPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(categories) { cat ->
+                    val isSelected = selectedCategory == cat
+                    val icon = when (cat) {
+                        "Visita" -> Icons.Default.Person
+                        "Proveedor" -> Icons.Default.Handyman
+                        "Paquetería" -> Icons.Default.LocalShipping
+                        "Técnico / Servicios" -> Icons.Default.Build
+                        else -> Icons.Default.Celebration
+                    }
+                    Surface(
+                        onClick = { onSelectCategory(cat) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSelected) GoldPrimary.copy(alpha = 0.22f) else NavyCard,
+                        border = BorderStroke(1.5.dp, if (isSelected) GoldPrimary else Color(0xFF334155)),
+                        modifier = Modifier.height(40.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = if (isSelected) GoldPrimary else TextMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = cat,
+                                color = if (isSelected) GoldPrimary else Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Campo: Nombre Completo
         OutlinedTextField(
             value = visitorName,
             onValueChange = onVisitorNameChange,
-            label = { Text("Nombre Completo del Visitante *") },
+            label = { Text("Nombre Completo del Visitante / Proveedor *") },
             placeholder = { Text("Ej: Carlos Ramírez Morales") },
             leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = GoldPrimary) },
             singleLine = true,
@@ -579,42 +690,193 @@ private fun CreateTemporaryPassForm(
             )
         )
 
-        // Categoría de Visita
-        Text(
-            text = "Tipo de Visita:",
-            color = TextMuted,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold
+        // 3. Campo: ¿A qué casa va de visita?
+        OutlinedTextField(
+            value = destinationUnit,
+            onValueChange = onDestinationUnitChange,
+            label = { Text("¿A qué casa va de visita? *") },
+            placeholder = { Text("Ej: Casa #104, Manzana B") },
+            leadingIcon = { Icon(Icons.Default.Home, contentDescription = null, tint = CyanNeon) },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("qr_util_destination_house"),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = CyanNeon,
+                unfocusedBorderColor = Color(0xFF334155),
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedLabelColor = CyanNeon,
+                unfocusedLabelColor = TextMuted
+            )
         )
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+
+        // 4. Subir Identificación Oficial (INE, Pasaporte o Licencia - desde WhatsApp o Galería)
+        Card(
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = NavySurface),
+            border = BorderStroke(1.dp, if (attachedDocumentPath != null) SuccessGreen else Color(0xFF334155)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            items(categories) { cat ->
-                val isSelected = selectedCategory == cat
-                Surface(
-                    onClick = { onSelectCategory(cat) },
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isSelected) GoldPrimary.copy(alpha = 0.2f) else NavyCard,
-                    border = BorderStroke(1.dp, if (isSelected) GoldPrimary else Color(0xFF334155)),
-                    modifier = Modifier.height(34.dp)
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.padding(horizontal = 10.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        Icon(
+                            imageVector = Icons.Default.Badge,
+                            contentDescription = null,
+                            tint = if (attachedDocumentPath != null) SuccessGreen else GoldPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
                         Text(
-                            text = cat,
-                            color = if (isSelected) GoldPrimary else Color.White,
+                            text = "Identificación Oficial (INE / Pasaporte / Licencia)",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    if (attachedDocumentPath != null) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = SuccessGreen.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, SuccessGreen)
+                        ) {
+                            Text(
+                                text = "Adjuntado",
+                                color = SuccessGreen,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    text = "No requieres el documento físico: sube la foto que te mandaron por WhatsApp o desde tus archivos para verificación en garita.",
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp
+                )
+
+                if (attachedDocumentPath != null) {
+                    // Vista previa del documento cargado
+                    val loadedBitmap = remember(attachedDocumentPath) {
+                        com.example.utils.ImageCaptureHelper.loadBitmapFromPath(attachedDocumentPath, 400, 300)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(NavyDark, RoundedCornerShape(10.dp))
+                            .padding(8.dp)
+                    ) {
+                        if (loadedBitmap != null) {
+                            Image(
+                                bitmap = loadedBitmap.asImageBitmap(),
+                                contentDescription = "Vista previa documento",
+                                modifier = Modifier
+                                    .size(60.dp, 45.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .border(1.dp, SuccessGreen, RoundedCornerShape(6.dp))
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Description,
+                                contentDescription = null,
+                                tint = SuccessGreen,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = attachedDocumentName ?: "Documento Oficial",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Listo para validación en caseta",
+                                color = SuccessGreen,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { onAttachDocument(null, null) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Eliminar",
+                                tint = AlertRed,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Botones para adjuntar
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, GoldPrimary),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldPrimary),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (attachedDocumentPath == null) "Foto WhatsApp / Galería" else "Cambiar Foto",
                             fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            docPickerLauncher.launch("*/*")
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, CyanNeon),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon),
+                        modifier = Modifier.weight(0.9f)
+                    ) {
+                        Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Archivo PDF/Doc",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
         }
 
-        // Fila: Documento y Placas
+        // 5. Placas y Folio de INE (Opcionales)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -622,7 +884,7 @@ private fun CreateTemporaryPassForm(
             OutlinedTextField(
                 value = visitorDocument,
                 onValueChange = onVisitorDocumentChange,
-                label = { Text("INE / DNI (Opcional)") },
+                label = { Text("No. INE / Folio (Opcional)") },
                 placeholder = { Text("Ej: 12345678") },
                 singleLine = true,
                 modifier = Modifier
@@ -825,6 +1087,7 @@ private fun PassGenerationSuccessView(
     pass: TemporaryAccessPass,
     qrBitmap: Bitmap?,
     condominiumName: String,
+    attachedDocumentPath: String? = null,
     onNewPass: () -> Unit,
     onSimulateScan: (String) -> Unit
 ) {
@@ -856,6 +1119,49 @@ private fun PassGenerationSuccessView(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+
+        if (!attachedDocumentPath.isNullOrBlank()) {
+            val docBitmap = remember(attachedDocumentPath) {
+                com.example.utils.ImageCaptureHelper.loadBitmapFromPath(attachedDocumentPath, 300, 200)
+            }
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = SuccessGreen.copy(alpha = 0.12f),
+                border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.padding(10.dp)
+                ) {
+                    if (docBitmap != null) {
+                        Image(
+                            bitmap = docBitmap.asImageBitmap(),
+                            contentDescription = "Identificación oficial",
+                            modifier = Modifier
+                                .size(50.dp, 38.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                        )
+                    } else {
+                        Icon(Icons.Default.Badge, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(28.dp))
+                    }
+                    Column {
+                        Text(
+                            text = "🪪 Identificación Oficial Adjunta",
+                            color = SuccessGreen,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "INE / Pasaporte / Licencia verificable en Garita",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 10.sp
+                        )
+                    }
+                }
             }
         }
 

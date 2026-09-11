@@ -37,9 +37,9 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 enum class PackageTabFilter(val label: String) {
-    PENDING("En Caseta (Pendientes)"),
-    DELIVERED("Historial de Entregados"),
-    ALL("Todos")
+    PENDING("Avisos Pendientes de Entrega"),
+    DELIVERED("Entregados a Residentes"),
+    ALL("Todos los Registros")
 }
 
 /**
@@ -159,7 +159,7 @@ fun PackageCenterHub(
                                 color = GoldPrimary
                             )
                             Text(
-                                if (filterUnitId != null) "Domicilio: $filterUnitId" else "Recepción, Notificación y Entrega Digital",
+                                if (filterUnitId != null) "Domicilio: $filterUnitId" else "Aviso Inmediato, Registro y Entrega Directa",
                                 fontSize = 11.sp,
                                 color = CyanNeon
                             )
@@ -176,12 +176,36 @@ fun PackageCenterHub(
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, tint = NavyDark, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Recibir", color = NavyDark, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Avisar Llegada", color = NavyDark, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Banner Directiva Obligatoria: La caseta no resguarda físicamente
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = NavyCard,
+                    border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.4f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Shield, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            "🛡️ REGLA OPERATIVA: La caseta NO resguarda físicamente la paquetería. Detecta llegada, genera evidencia y notifica al residente para entrega directa.",
+                            fontSize = 10.sp,
+                            color = Color.White,
+                            lineHeight = 13.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Métricas Rápidas
                 Row(
@@ -195,7 +219,7 @@ fun PackageCenterHub(
                         border = BorderStroke(1.dp, WarningOrange.copy(alpha = 0.3f))
                     ) {
                         Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("En Caseta", fontSize = 10.sp, color = TextMuted)
+                            Text("Avisos Pend.", fontSize = 10.sp, color = TextMuted)
                             Text("$pendingCount", fontSize = 16.sp, fontWeight = FontWeight.Black, color = WarningOrange)
                         }
                     }
@@ -738,11 +762,29 @@ private fun ReceivePackageDialog(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Inventory2, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(22.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("RECEPCIÓN DE PAQUETE", fontWeight = FontWeight.Black, fontSize = 14.sp, color = GoldPrimary)
+                        Column {
+                            Text("AVISO DE LLEGADA DE PAQUETE", fontWeight = FontWeight.Black, fontSize = 13.sp, color = GoldPrimary)
+                            Text("Sin resguardo físico en caseta", fontSize = 10.sp, color = CyanNeon)
+                        }
                     }
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = TextMuted)
                     }
+                }
+
+                // Banner recordatorio de regla de no resguardo
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = NavyCard,
+                    border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "🛡️ Notificación inmediata al residente para coordinar entrega o acceso del repartidor. Cero almacenamiento físico.",
+                        fontSize = 10.sp,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                    )
                 }
 
                 // 1. Domicilio / Residente Destinatario
@@ -917,7 +959,7 @@ private fun ReceivePackageDialog(
                     Icon(Icons.Default.Send, contentDescription = null, tint = NavyDark, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        "📦 Recibir y Notificar Inmediatamente",
+                        "📦 Avisar Llegada y Notificar Inmediatamente",
                         color = NavyDark,
                         fontWeight = FontWeight.Black,
                         fontSize = 13.sp

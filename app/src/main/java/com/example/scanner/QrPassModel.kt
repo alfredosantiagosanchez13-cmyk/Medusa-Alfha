@@ -30,7 +30,24 @@ data class QrPassEntity(
     val maxEntries: Int = 1,
     var currentEntriesCount: Int = 0,
     val note: String? = null
-)
+) {
+    fun toRoomEntity(): com.example.data.passes.QrPassRoomEntity {
+        return com.example.data.passes.QrPassRoomEntity(
+            passCode = passCode,
+            guestName = guestName,
+            guestDocument = guestDocument,
+            destinationHouse = destinationHouse,
+            hostResidentName = hostResidentName,
+            vehiclePlate = vehiclePlate,
+            passType = passType,
+            validUntilMillis = validUntilMillis,
+            maxEntries = maxEntries,
+            currentEntriesCount = currentEntriesCount,
+            note = note,
+            isActive = true
+        )
+    }
+}
 
 data class VerificationResult(
     val passCode: String,

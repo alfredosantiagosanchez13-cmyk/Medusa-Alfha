@@ -624,6 +624,7 @@ fun CasetaAccesosIsolatedSection(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val allVehicles by db.vehicleDao().getAllVehicles().collectAsState(initial = emptyList())
     var manualCode by remember { mutableStateOf("") }
     var activeVerificationResult by remember { mutableStateOf<VerificationResult?>(null) }
     var showExpressModal by remember { mutableStateOf(false) }
@@ -722,6 +723,16 @@ fun CasetaAccesosIsolatedSection(
             }
         }
 
+        // Flujo Táctico Ultrarrápido de Garita Principal (2 Fotos + Notificar Residente)
+        item {
+            GaritaFastVehicleFlowCard(
+                condoDisplayName = condo.displayName,
+                condoTag = condo.shortTag,
+                defaultDestinationCasa = if (condo == CondoTarget.PARAISO) "Casa 01" else "Calle 1 #01",
+                visitorRepo = visitorRepo
+            )
+        }
+
         // Express Registration Action Button
         item {
             Button(
@@ -813,8 +824,20 @@ fun CasetaAccesosIsolatedSection(
                             )
                             OutlinedTextField(
                                 value = expressPlate,
-                                onValueChange = { expressPlate = it },
-                                label = { Text("Placa (Opcional)", fontSize = 11.sp) },
+                                onValueChange = { input ->
+                                    expressPlate = input
+                                    val clean = input.trim().replace(" ", "").replace("-", "")
+                                    if (clean.length >= 3) {
+                                        val matched = allVehicles.firstOrNull {
+                                            it.plate.replace(" ", "").replace("-", "").equals(clean, ignoreCase = true)
+                                        }
+                                        if (matched != null) {
+                                            if (expressUnit.isBlank()) expressUnit = matched.unitId
+                                            if (expressHost.isBlank()) expressHost = matched.ownerName
+                                        }
+                                    }
+                                },
+                                label = { Text("Placa (Consulta Rápida)", fontSize = 11.sp) },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color.White,
@@ -823,6 +846,43 @@ fun CasetaAccesosIsolatedSection(
                                 ),
                                 modifier = Modifier.weight(1f)
                             )
+                        }
+
+                        val cleanExpressPlate = expressPlate.trim().replace(" ", "").replace("-", "")
+                        val matchedResVehicle = remember(cleanExpressPlate, allVehicles) {
+                            if (cleanExpressPlate.length >= 3) {
+                                allVehicles.firstOrNull {
+                                    it.plate.replace(" ", "").replace("-", "").equals(cleanExpressPlate, ignoreCase = true)
+                                }
+                            } else null
+                        }
+
+                        if (matchedResVehicle != null) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = GoldPrimary.copy(alpha = 0.15f)),
+                                border = BorderStroke(1.dp, GoldPrimary),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DirectionsCar,
+                                        contentDescription = null,
+                                        tint = GoldPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Padrón: ${matchedResVehicle.brand} ${matchedResVehicle.model} • ${matchedResVehicle.ownerName} (${matchedResVehicle.unitId})",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = GoldPrimary
+                                    )
+                                }
+                            }
                         }
 
                         OutlinedTextField(
@@ -841,7 +901,7 @@ fun CasetaAccesosIsolatedSection(
                         Button(
                             onClick = {
                                 if (expressName.isNotBlank()) {
-                                    val folio = AlphaCoreEngine.generateUniqueFolio("ACC")
+                                    val folio = AlphaCoreEngine.generateUniqueFolio("MED")
                                     scope.launch {
                                         visitorRepo.insertCheckIn(
                                             VisitorCheckIn(
@@ -1022,17 +1082,19 @@ fun CasetaAccesosIsolatedSection(
                 }
             }
 
-            val entries = filteredCheckIns.map { it.toVisitorEntry() }
             RecentVisitorEntriesList(
-                entries = entries,
-                onStatusChange = { entry, newStatus ->
-                    val idLong = entry.id.toLongOrNull()
-                    if (idLong != null) {
-                        scope.launch {
-                            if (newStatus == VisitorStatus.DEPARTED) {
-                                visitorRepo.registerCheckOut(idLong, notes = "Check-out 1 toque en ${condo.displayName}")
-                                Toast.makeText(context, "Salida registrada en ${condo.displayName}", Toast.LENGTH_SHORT).show()
-                            }
+                checkIns = filteredCheckIns,
+                onCheckOut = { checkIn ->
+                    scope.launch {
+                        visitorRepo.registerCheckOut(checkIn.id, notes = "Check-out 1 toque en ${condo.displayName}")
+                        Toast.makeText(context, "Salida registrada en ${condo.displayName}", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onStatusChange = { checkIn, newStatus ->
+                    scope.launch {
+                        if (newStatus == "DEPARTED") {
+                            visitorRepo.registerCheckOut(checkIn.id, notes = "Check-out 1 toque en ${condo.displayName}")
+                            Toast.makeText(context, "Salida registrada en ${condo.displayName}", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -1256,6 +1318,16 @@ fun CasetaVisitantesIsolatedSection(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // Flujo Táctico Garita 2 Fotos + Notificación al Residente
+        item {
+            GaritaFastVehicleFlowCard(
+                condoDisplayName = condo.displayName,
+                condoTag = condo.shortTag,
+                defaultDestinationCasa = if (condo == CondoTarget.PARAISO) "Casa 01" else "Calle 1 #01",
+                visitorRepo = visitorRepo
+            )
+        }
+
         item {
             Button(
                 onClick = { showForm = !showForm },
@@ -1497,7 +1569,21 @@ fun CasetaPaqueteriaIsolatedSection(
                     border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.3f))
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("📦 RECEPCIÓN DE PAQUETES · CONDOMINIO PARAÍSO (32 CASAS)", color = GoldPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("📦 AVISO DE LLEGADA DE PAQUETERÍA · CONDOMINIO PARAÍSO (32 CASAS)", color = GoldPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+
+                        Surface(
+                            color = WarningOrange.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, WarningOrange.copy(alpha = 0.4f))
+                        ) {
+                            Text(
+                                "🛡️ REGLA OPERATIVA: Caseta NO recibe ni resguarda físicamente paquetes. Se notifica al residente para que decida: A) Recibir en garita, B) Autorizar paso del repartidor, o C) No autorizar.",
+                                color = WarningOrange,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
 
                         Text("Selecciona la Casa (01 a 32):", color = TextMuted, fontSize = 11.sp)
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1573,8 +1659,7 @@ fun CasetaPaqueteriaIsolatedSection(
                                             val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanTel"))
                                             context.startActivity(intent)
                                         } else {
-                                            val directoNota = if (isPaqueteDirecto) "" else " Puede recogerlo en la caseta de Condominio Paraíso."
-                                            val msg = "Le informamos que llegó un paquete para Casa ${String.format("%02d", selectedCasaNum)}: ${packageDesc.ifBlank { "1 paquete" }}.$directoNota — Seguridad"
+                                            val msg = "📦 Seguridad Paraíso: Se encuentra repartidor en garita con entrega para Casa ${String.format("%02d", selectedCasaNum)} (${packageDesc.ifBlank { "Paquete/Sobre" }}). Por seguridad, caseta no resguarda paquetes. Favor de confirmar: A) Baja a recibir a garita, B) Autoriza acceso a domicilio, o C) No autoriza."
                                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/52$cleanTel?text=${Uri.encode(msg)}"))
                                             try {
                                                 context.startActivity(intent)
@@ -1583,7 +1668,7 @@ fun CasetaPaqueteriaIsolatedSection(
                                                 context.startActivity(callIntent)
                                             }
                                         }
-                                        Toast.makeText(context, "✅ Paquete registrado para Casa ${String.format("%02d", selectedCasaNum)}", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "✅ Aviso de paquetería emitido para Casa ${String.format("%02d", selectedCasaNum)}", Toast.LENGTH_SHORT).show()
                                         packageDesc = ""
                                     }
                                 }
@@ -1592,14 +1677,14 @@ fun CasetaPaqueteriaIsolatedSection(
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(if (isSinWhatsapp) "📞 Registrar y Llamar (Casa 22)" else "📲 Registrar y Avisar por WhatsApp", fontWeight = FontWeight.Bold)
+                            Text(if (isSinWhatsapp) "📞 Registrar Aviso y Llamar (Casa 22)" else "📲 Notificar Llegada por WhatsApp", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
 
             item {
-                Text("📋 PAQUETES PENDIENTES EN CASETA PARAÍSO (${condoPackages.count { it.status == "RECIBIDO" }})", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("📋 AVISOS ACTIVOS DE PAQUETERÍA (${condoPackages.count { it.status == "RECIBIDO" }})", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
 
             items(condoPackages) { pkg ->
@@ -2034,7 +2119,7 @@ fun CasetaIncidentesIsolatedSection(
                         Button(
                             onClick = {
                                 if (detailsInput.isNotBlank()) {
-                                    val folio = AlphaCoreEngine.generateUniqueFolio("INC")
+                                    val folio = AlphaCoreEngine.generateUniqueFolio("MED")
                                     scope.launch {
                                         incidentDao.insertIncident(
                                             IncidentEntity(

@@ -17,6 +17,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.tasks.await
+import com.example.auth.AlfhaRole
+import com.example.auth.AlfhaSecurityContext
+import com.example.data.auth.AlfhaUserEntity
+import com.example.data.booking.AppDatabase
 
 /**
  * Estado de autenticación del usuario en Firebase.
@@ -39,7 +43,14 @@ class FirebaseAuthManager(
     private val context: Context
 ) {
     private val tag = "FirebaseAuthManager"
-    private val credentialManager = CredentialManager.create(context)
+    private val credentialManager: CredentialManager? by lazy {
+        try {
+            CredentialManager.create(context)
+        } catch (e: Exception) {
+            Log.w(tag, "CredentialManager no pudo ser inicializado: ${e.message}")
+            null
+        }
+    }
 
     private val _authState = MutableStateFlow<AuthUiState>(AuthUiState.Idle)
     val authState: StateFlow<AuthUiState> = _authState.asStateFlow()
@@ -79,6 +90,13 @@ class FirebaseAuthManager(
             return Result.failure(IllegalStateException(error))
         }
 
+        val credManager = credentialManager
+        if (credManager == null) {
+            val errorMsg = "Credential Manager no está disponible en este dispositivo."
+            _authState.value = AuthUiState.Error(errorMsg)
+            return Result.failure(IllegalStateException(errorMsg))
+        }
+
         return try {
             val googleIdOption = GetSignInWithGoogleOption.Builder(serverClientId)
                 .build()
@@ -87,7 +105,7 @@ class FirebaseAuthManager(
                 .addCredentialOption(googleIdOption)
                 .build()
 
-            val result: GetCredentialResponse = credentialManager.getCredential(
+            val result: GetCredentialResponse = credManager.getCredential(
                 request = request,
                 context = context
             )
@@ -140,6 +158,125 @@ class FirebaseAuthManager(
         }
     }
 
+    val currentUser: FirebaseUser?
+        get() = auth?.currentUser
+
+    /**
+     * Registra un nuevo usuario con Email, Contraseña y Nombre.
+     */
+    suspend fun signUpWithEmail(email: String, pass: String, displayName: String): Result<FirebaseUser> {
+        _authState.value = AuthUiState.Loading
+        val currentAuth = auth
+        if (currentAuth == null) {
+            val error = "Firebase no está inicializado."
+            _authState.value = AuthUiState.Error(error)
+            return Result.failure(IllegalStateException(error))
+        }
+
+        return try {
+            val result = currentAuth.createUserWithEmailAndPassword(email, pass).await()
+            val user = result.user ?: throw IllegalStateException("Usuario no creado.")
+            try {
+                val profileUpdates = com.google.firebase.auth.UserProfileChangeRequest.Builder()
+                    .setDisplayName(displayName)
+                    .build()
+                user.updateProfile(profileUpdates).await()
+            } catch (e: Exception) {
+                Log.w(tag, "No se pudo actualizar el nombre del perfil: ${e.message}")
+            }
+            _authState.value = AuthUiState.Authenticated(user)
+            Result.success(user)
+        } catch (e: Exception) {
+            val msg = e.localizedMessage ?: "Error al registrar usuario en Firebase"
+            _authState.value = AuthUiState.Error(msg)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Envía correo para restablecer contraseña.
+     */
+    suspend fun sendPasswordReset(email: String): Result<Unit> {
+        val currentAuth = auth ?: return Result.failure(IllegalStateException("Firebase no disponible"))
+        return try {
+            currentAuth.sendPasswordResetEmail(email).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Autenticación anónima para modo operativo táctico rápido.
+     */
+    suspend fun signInAnonymously(): Result<FirebaseUser> {
+        _authState.value = AuthUiState.Loading
+        val currentAuth = auth
+        if (currentAuth == null) {
+            val error = "Firebase no disponible."
+            _authState.value = AuthUiState.Error(error)
+            return Result.failure(IllegalStateException(error))
+        }
+
+        return try {
+            val result = currentAuth.signInAnonymously().await()
+            val user = result.user ?: throw IllegalStateException("Sesión anónima fallida")
+            _authState.value = AuthUiState.Authenticated(user)
+            Result.success(user)
+        } catch (e: Exception) {
+            val msg = e.localizedMessage ?: "Error en acceso de invitado"
+            _authState.value = AuthUiState.Error(msg)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Sincroniza el usuario autenticado de Firebase con la tabla Room `alfha_users`
+     * y el contexto de seguridad RBAC `AlfhaSecurityContext`.
+     */
+    suspend fun syncFirebaseUserToLocalRoom(
+        db: AppDatabase,
+        firebaseUser: FirebaseUser,
+        targetRole: com.example.auth.AlfhaRole = com.example.auth.AlfhaRole.RESIDENTE
+    ): com.example.data.auth.AlfhaUserEntity = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val userDao = db.alfhaUserDao()
+        val userEmail = firebaseUser.email ?: "${firebaseUser.uid}@alfhaseguridad.com"
+        val existingByEmail = userDao.getUserByEmail(userEmail)
+        val existingById = userDao.getUserById(firebaseUser.uid)
+
+        val localUser = when {
+            existingByEmail != null -> {
+                userDao.updateLastLogin(existingByEmail.id)
+                existingByEmail.copy(lastLoginMillis = System.currentTimeMillis())
+            }
+            existingById != null -> {
+                userDao.updateLastLogin(existingById.id)
+                existingById.copy(lastLoginMillis = System.currentTimeMillis())
+            }
+            else -> {
+                val displayName = firebaseUser.displayName.takeIf { !it.isNullOrBlank() }
+                    ?: userEmail.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
+                val newUser = com.example.data.auth.AlfhaUserEntity(
+                    id = firebaseUser.uid,
+                    name = displayName,
+                    email = userEmail,
+                    role = targetRole.name,
+                    unitOrDepartment = if (targetRole == com.example.auth.AlfhaRole.GUARDIA) "Garita Táctica" else "Acceso Firebase",
+                    permissionsCsv = "",
+                    isActive = true,
+                    lastLoginMillis = System.currentTimeMillis(),
+                    updatedAtMillis = System.currentTimeMillis(),
+                    updatedBy = "FIREBASE_AUTH_SYNC"
+                )
+                userDao.insertUser(newUser)
+                newUser
+            }
+        }
+
+        com.example.auth.AlfhaSecurityContext.setCurrentUser(localUser)
+        localUser
+    }
+
     /**
      * Cierra la sesión activa.
      */
@@ -149,6 +286,7 @@ class FirebaseAuthManager(
         } catch (e: Exception) {
             Log.w(tag, "Error al cerrar sesión en Firebase: ${e.message}")
         }
+        com.example.auth.AlfhaSecurityContext.clearSession()
         _authState.value = AuthUiState.Unauthenticated()
     }
 }

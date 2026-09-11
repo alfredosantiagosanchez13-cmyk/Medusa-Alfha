@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -67,6 +69,7 @@ import com.example.auth.UserRole
 import androidx.compose.material.icons.filled.History
 import com.example.data.booking.AppDatabase
 import com.example.data.chat.AiGuardChatLog
+import com.example.data.core.MedusaOperationalAiEngine
 import com.example.ui.components.PersistentChatHistoryView
 import com.example.ui.components.VoiceIncidentLoggerComponent
 import com.example.ui.theme.CyanNeon
@@ -96,6 +99,7 @@ data class ChatMessage(
 fun CondoAiCopilotScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val db = remember { AppDatabase.getDatabase(context) }
     var activeRole by remember { mutableStateOf(UserRole.GUARD) }
     var inputText by remember { mutableStateOf("") }
     var isGeneratingResponse by remember { mutableStateOf(false) }
@@ -106,7 +110,7 @@ fun CondoAiCopilotScreen() {
         mutableStateListOf(
             ChatMessage(
                 sender = "AI",
-                content = "¡Hola! Soy el Copiloto AI de Garita MEDUSA ALFHA.\n\nSujeto a la política de **Control de Acceso Basado en Roles (RBAC)**:\n• **Rol Actual:** Guardia de Caseta\n• **Comandos Permitidos:** Actualización de estado de visitantes y gestión de alertas de emergencia.",
+                content = "¡Hola! Soy el Copiloto IA de Garita MEDUSA ALFHA.\n\nSujeto a la política de **Control de Acceso Basado en Roles (RBAC)** y conectado en tiempo real a **Room SQLite**:\n• **Rol Actual:** Guardia de Caseta\n• **Directiva Sagrada:** ESTO DEVUELVE TIEMPO (Tiempo = Familia)\n• **Consultas:** Resumen ejecutivo, visitas activas, avisos de paquetería, incidencias, rondines y turnos.",
                 activeRole = UserRole.GUARD
             )
         )
@@ -412,45 +416,61 @@ fun CondoAiCopilotScreen() {
                 }
             )
         } else {
-            // Quick Suggestion Chips according to role permissions
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            val commandSuggestions = if (activeRole == UserRole.GUARD) {
-                listOf(
-                    "Actualizar estado a Checked-In",
-                    "Gestionar alerta de pánico",
-                    "Configurar parámetros del sistema" // Will trigger RBAC Access Denied for Guard
-                )
-            } else {
-                listOf(
-                    "Configurar parámetros de cámara",
-                    "Modificar política de listas negras",
-                    "Auditoría de base de datos"
-                )
-            }
-
-            commandSuggestions.forEach { command ->
-                Surface(
-                    onClick = {
-                        inputText = command
-                    },
-                    shape = RoundedCornerShape(8.dp),
-                    color = NavyCard,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF374151)),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = command,
-                        color = TextMuted,
-                        fontSize = 10.sp,
-                        maxLines = 1,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
+            // Quick Suggestion Chips according to role permissions with horizontal scroll
+            val suggestionScrollState = rememberScrollState()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(suggestionScrollState),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                val commandSuggestions = if (activeRole == UserRole.GUARD) {
+                    listOf(
+                        "📋 Resumen Ejecutivo",
+                        "⏱️ Tiempo Devuelto",
+                        "🚪 Visitas Activas",
+                        "📦 Paquetes Avisados",
+                        "🔍 Análisis de Incidencias",
+                        "🕒 Turnos y Anomalías",
+                        "🛡️ Informe de Supervisión",
+                        "Actualizar estado a Checked-In",
+                        "Gestionar alerta de pánico",
+                        "Configurar parámetros del sistema" // Will trigger RBAC Access Denied for Guard
+                    )
+                } else {
+                    listOf(
+                        "📋 Resumen Ejecutivo",
+                        "⏱️ Tiempo Devuelto",
+                        "🔍 Análisis de Incidencias",
+                        "🕒 Turnos y Anomalías",
+                        "🛡️ Informe de Supervisión",
+                        "Configurar parámetros de cámara",
+                        "Modificar política de listas negras",
+                        "Auditoría de base de datos"
                     )
                 }
+
+                commandSuggestions.forEach { command ->
+                    Surface(
+                        onClick = {
+                            inputText = command
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        color = NavyCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF374151)),
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = command,
+                            color = if (command.contains("📋") || command.contains("⏱️") || command.contains("🔍")) GoldPrimary else TextMuted,
+                            fontSize = 11.sp,
+                            fontWeight = if (command.contains("📋") || command.contains("⏱️")) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+                    }
+                }
             }
-        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -481,7 +501,7 @@ fun CondoAiCopilotScreen() {
                             strokeWidth = 2.dp
                         )
                         Text(
-                            text = "Evaluando comando con política RBAC de ${activeRole.displayName}...",
+                            text = "Consultando base de datos Room SQLite y evaluando política...",
                             color = TextMuted,
                             fontSize = 11.sp
                         )
@@ -503,7 +523,7 @@ fun CondoAiCopilotScreen() {
                 onValueChange = { inputText = it },
                 placeholder = {
                     Text(
-                        text = if (activeRole == UserRole.GUARD) "Comandos de visitas o alertas..." else "Comandos de configuración o sistema...",
+                        text = if (activeRole == UserRole.GUARD) "Pregunta sobre visitas, paquetería o resumen..." else "Comandos de configuración o sistema...",
                         color = TextMuted,
                         fontSize = 12.sp
                     )
@@ -538,8 +558,34 @@ fun CondoAiCopilotScreen() {
                         isGeneratingResponse = true
 
                         scope.launch {
-                            delay(800) // Simulate streaming AI response with RBAC policy evaluation
-                            val (aiAnswer, isDenied) = processCommandWithRbacPolicy(userQuery, activeRole)
+                            // Persistir consulta en auditoría Room
+                            try {
+                                db.aiGuardChatLogDao().insertChatLog(
+                                    AiGuardChatLog(
+                                        sender = "USER",
+                                        content = userQuery,
+                                        activeRole = activeRole.name,
+                                        operatorName = if (activeRole == UserRole.GUARD) "Guardia en Turno" else "Administrador"
+                                    )
+                                )
+                            } catch (_: Exception) {}
+
+                            delay(400) // Simular flujo reactivo
+                            val (aiAnswer, isDenied) = processCommandWithRbacPolicy(db, userQuery, activeRole)
+
+                            // Persistir respuesta en auditoría Room
+                            try {
+                                db.aiGuardChatLogDao().insertChatLog(
+                                    AiGuardChatLog(
+                                        sender = "AI",
+                                        content = aiAnswer,
+                                        activeRole = activeRole.name,
+                                        isAccessDenied = isDenied,
+                                        operatorName = "Copiloto IA MEDUSA"
+                                    )
+                                )
+                            } catch (_: Exception) {}
+
                             chatHistory.add(
                                 ChatMessage(
                                     sender = "AI",
@@ -667,9 +713,9 @@ private fun ChatMessageBubble(msg: ChatMessage) {
 }
 
 /**
- * Processes commands strictly applying the RBAC policy layer.
+ * Processes commands strictly applying the RBAC policy layer and querying Room SQLite.
  */
-private fun processCommandWithRbacPolicy(query: String, role: UserRole): Pair<String, Boolean> {
+private suspend fun processCommandWithRbacPolicy(db: AppDatabase, query: String, role: UserRole): Pair<String, Boolean> {
     val evaluation = RbacManager.evaluateAiCommandAccess(role, query)
 
     if (evaluation is RbacEvaluationResult.AccessDenied) {
@@ -683,53 +729,60 @@ private fun processCommandWithRbacPolicy(query: String, role: UserRole): Pair<St
 
     val q = query.lowercase(Locale.getDefault())
 
-    val responseText = when (role) {
-        UserRole.GUARD -> {
-            if (q.contains("estado") || q.contains("checked-in") || q.contains("departed") || q.contains("visitante") || q.contains("actualizar")) {
-                "✅ **Comando de Guardia Aprobado (Permiso: UPDATE_VISITOR_STATUS)**\n\n" +
-                        "Se ha procesado la solicitud para el registro de visitante:\n" +
-                        "1. **Acción:** Actualización de estado en base de datos Room.\n" +
-                        "2. **Auditoría:** Guardado con estampa de tiempo e ID de operador de garita.\n" +
-                        "3. **Notificación:** Notificación enviada al residente de la unidad de destino."
-            } else if (q.contains("panico") || q.contains("pánico") || q.contains("alerta") || q.contains("emergencia")) {
-                "🚨 **Comando de Guardia Aprobado (Permiso: MANAGE_PANIC_ALERTS)**\n\n" +
-                        "Protocolo de Atención de Alerta de Emergencia:\n" +
-                        "1. **Verificación:** Alerta registrada en la consola de monitoreo.\n" +
-                        "2. **Despacho:** Guardias de patrulla notificados vía radio e interfaz de mapa de piso.\n" +
-                        "3. **Seguimiento:** Estado marcado en 'Atención en Curso'."
-            } else {
-                "🛡️ **Asistencia de Guardia de Caseta (Alcance Permitido)**\n\n" +
-                        "Entendido respecto a '$query'. Sus permisos vigentes le permiten:\n" +
-                        "• Actualizar estado de ingreso/salida de visitantes.\n" +
-                        "• Atender y desactivar alertas de pánico e incidencias físicas en la garita."
-            }
-        }
-
-        UserRole.ADMIN -> {
-            if (q.contains("configurar") || q.contains("camara") || q.contains("cámara") || q.contains("escaner") || q.contains("escáner") || q.contains("parametro") || q.contains("parámetro")) {
+    // Direct Administrative Hardware & Policy Configuration Commands
+    if (role == UserRole.ADMIN) {
+        if (q.contains("configurar") || q.contains("camara") || q.contains("cámara") || q.contains("escaner") || q.contains("escáner") || q.contains("parametro") || q.contains("parámetro")) {
+            return Pair(
                 "⚙️ **Comando de Administrador Aprobado (Permiso: CONFIGURE_SYSTEM_SETTINGS)**\n\n" +
                         "Ajustes de Parámetros del Sistema de Seguridad:\n" +
                         "1. **Umbral de Escaneo CameraX:** 0.85 FPS / Enfoque continuo activado.\n" +
                         "2. **Sensor Biométrico:** Habilitado para autenticación de guardias.\n" +
                         "3. **Sensibilidad de Pánico:** 300 ms de pulsación sostenida.\n" +
-                        "4. **Persistencia:** Configuración guardada en preferencias del sistema."
-            } else if (q.contains("politica") || q.contains("política") || q.contains("lista negra") || q.contains("bloqueo")) {
+                        "4. **Persistencia:** Configuración guardada en preferencias del sistema.",
+                false
+            )
+        } else if (q.contains("politica") || q.contains("política") || q.contains("lista negra") || q.contains("bloqueo")) {
+            return Pair(
                 "🛡️ **Comando de Administrador Aprobado (Permiso: MODIFY_SECURITY_POLICIES)**\n\n" +
                         "Gestión de Políticas de Seguridad y Listas de Control:\n" +
                         "1. **Reglas de Acceso:** Restricción de ingreso nocturno a visitas no enroladas.\n" +
-                        "2. **Listas de Bloqueo:** Verificación activa de documentos RUT restringidos por administración."
-            } else if (q.contains("auditoria") || q.contains("auditoría") || q.contains("base de datos") || q.contains("exportar")) {
+                        "2. **Listas de Bloqueo:** Verificación activa de documentos RUT restringidos por administración.",
+                false
+            )
+        } else if (q.contains("auditoria") || q.contains("auditoría") || q.contains("exportar")) {
+            return Pair(
                 "📊 **Comando de Administrador Aprobado (Permiso: AUDIT_FULL_DATABASE)**\n\n" +
                         "Módulo de Auditoría y Exportación de Sistema:\n" +
                         "1. **Exportación JSON:** Generación de esquema estandarizado para auditoría externa.\n" +
-                        "2. **Integridad Room DB:** Base de datos verificada sin corrupción de registros."
-            } else {
-                "🔑 **Acceso Total de Administrador:**\n\n" +
-                        "Procesando comando '$query' con privilegios elevados del sistema.\n" +
-                        "Tiene acceso ilimitado a configuraciones, parámetros de escáner, políticas y auditorías de copropiedad."
-            }
+                        "2. **Integridad Room DB:** Base de datos verificada sin corrupción de registros.",
+                false
+            )
         }
     }
 
-    return Pair(responseText, false)
+    // Direct Guard Operational Commands
+    if (role == UserRole.GUARD) {
+        if (q.contains("actualizar estado a checked-in") || q.contains("actualizar estado")) {
+            return Pair(
+                "✅ **Comando de Guardia Aprobado (Permiso: UPDATE_VISITOR_STATUS)**\n\n" +
+                        "Se ha procesado la verificación en base de datos Room:\n" +
+                        "1. **Acción:** Registro auditado y vinculado con estampa de tiempo.\n" +
+                        "2. **Notificación:** Notificación inmediata despachada al residente.",
+                false
+            )
+        } else if (q.contains("gestionar alerta de pánico") || q.contains("panico") || q.contains("pánico")) {
+            return Pair(
+                "🚨 **Comando de Guardia Aprobado (Permiso: MANAGE_PANIC_ALERTS)**\n\n" +
+                        "Protocolo de Atención de Alerta de Emergencia:\n" +
+                        "1. **Verificación:** Alerta registrada en la consola de monitoreo.\n" +
+                        "2. **Despacho:** Guardias de patrulla notificados vía radio e interfaz táctica.\n" +
+                        "3. **Seguimiento:** Estado marcado en 'Atención en Curso'.",
+                false
+            )
+        }
+    }
+
+    // Inteligencia Operacional basada en Room SQLite
+    val operationalResponse = MedusaOperationalAiEngine.answerOperationalQuery(db, query, role)
+    return Pair(operationalResponse, false)
 }

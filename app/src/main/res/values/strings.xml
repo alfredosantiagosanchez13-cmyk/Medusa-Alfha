@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">MEDUSA ALFHA</string>
+    <string name="default_web_client_id">188729568141-medusa.apps.googleusercontent.com</string>
+    <string name="login_title">MEDUSA ALFHA</string>
+    <string name="login_subtitle">Sistema Táctico de Seguridad &amp; Control Residencial</string>
+    <string name="google_sign_in">Continuar con Google</string>
+    <string name="email_label">Correo Electrónico</string>
+    <string name="password_label">Contraseña</string>
+    <string name="sign_in_button">Iniciar Sesión</string>
+    <string name="sign_up_button">Crear Cuenta</string>
 </resources>

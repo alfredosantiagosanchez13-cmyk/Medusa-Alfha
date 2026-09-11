@@ -38,5 +38,32 @@ data class VisitorEntry(
 
     val formattedCheckOutTime: String?
         get() = checkOutMillis?.let { SimpleDateFormat("HH:mm:ss - dd/MM/yyyy", Locale.getDefault()).format(Date(it)) }
+
+    fun toVisitorCheckIn(): com.example.data.visitor.VisitorCheckIn {
+        val statusStr = when (status) {
+            VisitorStatus.CHECKED_IN -> "CHECKED_IN"
+            VisitorStatus.VERIFIED -> "VERIFICADO"
+            VisitorStatus.DEPARTED -> "DEPARTED"
+            VisitorStatus.DENIED -> "DENEGADO"
+            VisitorStatus.PENDING -> "PENDIENTE"
+        }
+        return com.example.data.visitor.VisitorCheckIn(
+            id = id.toLongOrNull() ?: 0L,
+            folio = folio,
+            visitorName = visitorName,
+            visitorDocument = visitorDocument,
+            destinationHouse = destinationHouse,
+            passCode = passCode,
+            passTypeLabel = passTypeLabel,
+            vehiclePlate = vehiclePlate,
+            status = statusStr,
+            timestampMillis = timestampMillis,
+            checkOutMillis = checkOutMillis,
+            guardNotes = guardNotes,
+            residentNotes = residentNotes,
+            hostResidentName = hostResidentName,
+            photoPath = photoPath
+        )
+    }
 }
 

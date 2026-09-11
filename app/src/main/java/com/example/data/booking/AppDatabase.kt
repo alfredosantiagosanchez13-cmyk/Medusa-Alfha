@@ -45,6 +45,7 @@ import com.example.data.visitor.VisitorCheckInDao
 @Database(
     entities = [
         AmenityBooking::class,
+        CommonAreaBooking::class,
         VisitorCheckIn::class,
         UserProfileEntity::class,
         AiGuardChatLog::class,
@@ -65,11 +66,12 @@ import com.example.data.visitor.VisitorCheckInDao
         SyncQueueEntity::class,
         FieldValidationTestEntity::class
     ],
-    version = 20,
+    version = 21,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun amenityBookingDao(): AmenityBookingDao
+    abstract fun commonAreaBookingDao(): CommonAreaBookingDao
     abstract fun visitorCheckInDao(): VisitorCheckInDao
     abstract fun userProfileDao(): UserProfileDao
     abstract fun aiGuardChatLogDao(): AiGuardChatLogDao

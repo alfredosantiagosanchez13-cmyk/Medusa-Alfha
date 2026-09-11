@@ -114,7 +114,8 @@ object ResidentQrCodeUtility {
         durationHours: Int = 4,
         maxEntries: Int = 1,
         notes: String? = null,
-        residentUid: String? = null
+        residentUid: String? = null,
+        documentPhotoUri: String? = null
     ): TemporaryAccessPass = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val folio = AlphaCoreEngine.generateUniqueFolio("MED")
@@ -164,7 +165,8 @@ object ResidentQrCodeUtility {
             timestampMillis = now,
             guardNotes = "Pase QR emitido por residente. Vence: $expiryStr • Máx: $maxEntries entradas",
             residentNotes = cleanNotes,
-            hostResidentName = cleanHost
+            hostResidentName = cleanHost,
+            photoPath = documentPhotoUri
         )
         val insertedId = db.visitorCheckInDao().insertCheckIn(checkIn)
         val finalCheckIn = checkIn.copy(id = insertedId)
@@ -326,5 +328,50 @@ object ResidentQrCodeUtility {
         val clip = android.content.ClipData.newPlainText(label, text)
         clipboard?.setPrimaryClip(clip)
         Toast.makeText(context, "Copiado al portapapeles: $text", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Construye un payload JSON estructurado para credencial QR de residente con soporte touchless.
+     */
+    fun generateResidentTouchlessPayload(
+        passCode: String,
+        residentName: String,
+        unitId: String,
+        vehiclePlate: String? = null,
+        condominiumId: String = "PARAISO"
+    ): String {
+        val plateField = if (!vehiclePlate.isNullOrBlank()) ""","plate":"$vehiclePlate"""" else ""
+        return """{"passCode":"$passCode","type":"RESIDENT","residentName":"$residentName","unitId":"$unitId","condo":"$condominiumId"$plateField,"touchless":true,"timestamp":${System.currentTimeMillis()}}"""
+    }
+
+    /**
+     * Asegura que exista el pase de residente en Room para validación offline instantánea.
+     */
+    suspend fun registerResidentTouchlessCredential(
+        db: AppDatabase,
+        passCode: String,
+        residentName: String,
+        unitId: String,
+        vehiclePlate: String? = null,
+        condominiumId: String = "PARAISO"
+    ): QrPassRoomEntity = withContext(Dispatchers.IO) {
+        val existing = db.qrPassDao().getPassByCode(passCode)
+        if (existing != null) return@withContext existing
+
+        val entity = QrPassRoomEntity(
+            passCode = passCode,
+            guestName = residentName,
+            guestDocument = "Credencial Touchless Residente",
+            destinationHouse = unitId,
+            hostResidentName = residentName,
+            vehiclePlate = vehiclePlate,
+            passType = PassType.RESIDENT_PERMANENT,
+            validUntilMillis = System.currentTimeMillis() + (365L * 86400 * 1000),
+            maxEntries = 99999,
+            currentEntriesCount = 0,
+            note = "Credencial Touchless de Residente registrada para control de acceso sin contacto"
+        )
+        db.qrPassDao().insertPass(entity)
+        entity
     }
 }

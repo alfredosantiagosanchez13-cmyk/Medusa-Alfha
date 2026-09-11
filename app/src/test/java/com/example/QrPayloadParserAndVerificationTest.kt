@@ -69,4 +69,52 @@ class QrPayloadParserAndVerificationTest {
         assertEquals("", parsed.passCode)
         assertNull(parsed.guestName)
     }
+
+    @Test
+    fun testResidentTouchlessJsonPayload() {
+        val residentPayload = """
+            {
+                "passCode": "RES-TOUCHLESS-104",
+                "type": "RESIDENT",
+                "isResident": true,
+                "residentName": "Ing. Carlos Mendoza",
+                "destinationHouse": "Torre B - Depto 104",
+                "vehiclePlate": "MXL-4091"
+            }
+        """.trimIndent()
+
+        assertEquals("RES-TOUCHLESS-104", QrPayloadParser.extractEntryCode(residentPayload))
+
+        val parsed = QrPayloadParser.parse(residentPayload)
+        assertEquals("RES-TOUCHLESS-104", parsed.passCode)
+        assertEquals("Ing. Carlos Mendoza", parsed.guestName)
+        assertEquals("Torre B - Depto 104", parsed.destinationHouse)
+        assertEquals("MXL-4091", parsed.vehiclePlate)
+        assertEquals("RESIDENT_PERMANENT", parsed.passType)
+    }
+
+    @Test
+    fun testResidentTouchlessPrefixExtraction() {
+        assertEquals("RES-TOUCHLESS-104", QrPayloadParser.extractEntryCode("RES-TOUCHLESS-104"))
+        assertEquals("MEDUSA-RESIDENT-PARAISO-14", QrPayloadParser.extractEntryCode("  MEDUSA-RESIDENT-PARAISO-14  "))
+        assertEquals("TOUCHLESS-UNIT-201", QrPayloadParser.extractEntryCode("\"TOUCHLESS-UNIT-201\""))
+    }
+
+    @Test
+    fun testResidentQrCodeUtilityPayloadCompatibility() {
+        val payload = com.example.utils.ResidentQrCodeUtility.generateResidentTouchlessPayload(
+            passCode = "RES-104",
+            residentName = "Carlos Mendoza",
+            unitId = "Depto 104",
+            vehiclePlate = "MXL-4091",
+            condominiumId = "CENTINELA_1"
+        )
+
+        val parsed = QrPayloadParser.parse(payload)
+        assertEquals("RES-104", parsed.passCode)
+        assertEquals("Carlos Mendoza", parsed.guestName)
+        assertEquals("Depto 104", parsed.destinationHouse)
+        assertEquals("MXL-4091", parsed.vehiclePlate)
+        assertEquals("RESIDENT_PERMANENT", parsed.passType)
+    }
 }

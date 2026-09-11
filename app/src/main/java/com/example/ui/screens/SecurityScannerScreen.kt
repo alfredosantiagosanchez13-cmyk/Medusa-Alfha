@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Schedule
@@ -165,7 +166,9 @@ enum class ActiveScreenTab(val label: String, val icon: androidx.compose.ui.grap
 }
 
 @Composable
-fun SecurityScannerScreen() {
+fun SecurityScannerScreen(
+    onSignOut: () -> Unit = {}
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
@@ -377,6 +380,22 @@ fun SecurityScannerScreen() {
                                     contentDescription = "Firebase Cloud Sync",
                                     tint = GoldPrimary,
                                     modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = onSignOut,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .background(NavyCard, CircleShape)
+                                    .border(1.dp, GoldPrimary.copy(alpha = 0.35f), CircleShape)
+                                    .testTag("auth_sign_out_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Logout,
+                                    contentDescription = "Cerrar Sesión / Salir",
+                                    tint = GoldPrimary,
+                                    modifier = Modifier.size(15.dp)
                                 )
                             }
 

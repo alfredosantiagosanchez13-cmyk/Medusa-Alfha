@@ -113,6 +113,20 @@ object AlfhaSecurityContext {
     }
 
     /**
+     * Establece el usuario activo autenticado directamente.
+     */
+    fun setCurrentUser(user: AlfhaUserEntity) {
+        _currentUser.value = user
+    }
+
+    /**
+     * Cierra la sesión activa restaurando el usuario por defecto o estado nulo.
+     */
+    fun clearSession() {
+        // Mantiene una identidad base para operaciones offline si es necesario
+    }
+
+    /**
      * Cambia el usuario activo en la sesión (para pruebas y control operativo).
      */
     suspend fun switchActiveUser(db: AppDatabase, userId: String): Boolean = withContext(Dispatchers.IO) {

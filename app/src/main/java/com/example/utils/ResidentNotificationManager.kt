@@ -415,4 +415,111 @@ object ResidentNotificationManager {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         notificationManager?.notify(notificationId, notification)
     }
+
+    /**
+     * Notificación Push en tiempo real enviada desde la Caseta al Residente
+     * solicitando autorización de acceso con fotos tomadas en garita.
+     */
+    fun notifyAccessAuthorizationRequest(
+        context: Context,
+        requestId: String,
+        visitorName: String,
+        accessType: String,
+        destinationHouse: String,
+        vehiclePlate: String? = null,
+        hasIdPhoto: Boolean = false,
+        hasVehiclePhoto: Boolean = false
+    ) {
+        createNotificationChannel(context)
+        val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "RESIDENT_DASHBOARD")
+            putExtra("EXTRA_REQUEST_ID", requestId)
+            putExtra("EXTRA_NOTIFICATION_TYPE", "ACCESS_AUTHORIZATION_REQUEST")
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val photosSummary = buildString {
+            if (hasIdPhoto && hasVehiclePhoto) append(" • 📸 2 fotos adjuntas (INE y Vehículo/Placas)")
+            else if (hasIdPhoto) append(" • 📸 Foto de INE adjunta")
+            else if (hasVehiclePhoto) append(" • 🚗 Foto de Vehículo adjunta")
+        }
+
+        val plateInfo = if (!vehiclePlate.isNullOrBlank()) " • Placas: $vehiclePlate" else ""
+        val bigText = """
+            🚨 SOLICITUD DE ACCESO EN GARITA PRINCIPAL
+            • Visitante: $visitorName
+            • Tipo: $accessType
+            • Destino: $destinationHouse$plateInfo$photosSummary
+            
+            ⚠️ Acción Requerida: Abre la app para autorizar o negar el acceso en 1 toque.
+        """.trimIndent()
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("🚨 Visita en Garita para $destinationHouse")
+            .setContentText("$visitorName ($accessType) solicita ingreso")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setVibrate(longArrayOf(0, 300, 150, 300))
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .build()
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.notify(notificationId, notification)
+    }
+
+    /**
+     * Notificación del resultado de la autorización enviada a la caseta / sistema.
+     */
+    fun notifyAccessDecisionResult(
+        context: Context,
+        requestId: String,
+        visitorName: String,
+        destinationHouse: String,
+        authorized: Boolean
+    ) {
+        createNotificationChannel(context)
+        val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "CASETA")
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = if (authorized) "🟢 Acceso AUTORIZADO - $destinationHouse" else "🔴 Acceso DENEGADO - $destinationHouse"
+        val message = if (authorized) {
+            "El residente de $destinationHouse AUTORIZÓ el ingreso de $visitorName. Proceder a abrir pluma."
+        } else {
+            "El residente de $destinationHouse DENEGÓ el ingreso de $visitorName. No permitir acceso."
+        }
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(if (authorized) android.R.drawable.ic_dialog_info else android.R.drawable.stat_notify_error)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.notify(notificationId, notification)
+    }
 }

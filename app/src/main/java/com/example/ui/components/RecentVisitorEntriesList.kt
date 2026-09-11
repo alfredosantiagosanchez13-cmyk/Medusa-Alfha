@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.scanner.VisitorEntry
 import com.example.scanner.VisitorStatus
+import com.example.data.visitor.VisitorCheckIn
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.GoldPrimary
@@ -61,6 +62,30 @@ import com.example.ui.theme.NavySurface
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.WarningOrange
+
+@Composable
+fun RecentVisitorEntriesList(
+    checkIns: List<VisitorCheckIn>,
+    onCheckOut: ((VisitorCheckIn) -> Unit)? = null,
+    onStatusChange: ((VisitorCheckIn, String) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val entries = remember(checkIns) { checkIns.map { it.toVisitorEntry() } }
+    RecentVisitorEntriesList(
+        entries = entries,
+        onStatusChange = { entry, status ->
+            val matching = checkIns.firstOrNull { it.id.toString() == entry.id }
+            if (matching != null) {
+                if (status == VisitorStatus.DEPARTED && onCheckOut != null) {
+                    onCheckOut(matching)
+                } else if (onStatusChange != null) {
+                    onStatusChange(matching, status.name)
+                }
+            }
+        },
+        modifier = modifier
+    )
+}
 
 @Composable
 fun RecentVisitorEntriesList(

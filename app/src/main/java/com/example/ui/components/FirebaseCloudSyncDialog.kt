@@ -288,6 +288,35 @@ fun FirebaseCloudSyncDialog(
                                 modifier = Modifier.fillMaxWidth()
                             )
 
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        val webClientId = try {
+                                            context.getString(com.example.R.string.default_web_client_id)
+                                        } catch (e: Exception) {
+                                            "188729568141-medusa.apps.googleusercontent.com"
+                                        }
+                                        authManager.signInWithGoogle(webClientId)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(40.dp)
+                                    .testTag("dialog_google_sign_in_button"),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color.White,
+                                    contentColor = Color(0xFF1F1F1F)
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "G  Continuar con Google",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF1F1F1F)
+                                )
+                            }
+
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)

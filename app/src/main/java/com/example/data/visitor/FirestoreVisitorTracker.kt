@@ -114,7 +114,7 @@ class FirestoreVisitorTracker(
         _statusMessage.value = "Conectando a /condominiums/$condominiumId/visitor_logs"
 
         try {
-            val collectionRef = firestore.collection(FirestoreTenantManager.COL_CONDOMINIUMS)
+            val collectionRef = firestore.collection(FirestoreTenantManager.ROOT_CONDOMINIUMS)
                 .document(condominiumId)
                 .collection(FirestoreTenantManager.SUB_VISITOR_LOGS)
 

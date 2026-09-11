@@ -61,6 +61,7 @@ import com.example.ui.components.ResidentTemporaryAccessQrHubDialog
 import com.example.ui.components.ResidentEmergencyTopBarButton
 import com.example.ui.components.ResidentEmergencyBannerCard
 import com.example.ui.components.ResidentEmergencyDialog
+import com.example.ui.components.ResidentAccessAuthorizationBanner
 import com.example.ui.components.TimeLimitedDigitalPassModal
 import com.example.ui.components.TimedTokenStatusBadge
 import com.example.ui.components.VisitorAccessTokenInfo
@@ -91,6 +92,7 @@ fun ResidentDashboardScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { AppDatabase.getDatabase(context) }
+    val visitorRepo = remember { com.example.data.visitor.VisitorCheckInRepository(db.visitorCheckInDao()) }
 
     // Usuario autenticado en el contexto de seguridad ALFHA
     val currentUser by AlfhaSecurityContext.currentUser.collectAsState()
@@ -244,6 +246,14 @@ fun ResidentDashboardScreen(
                         onDismiss = { dismissedBannerFolio = lastFcmPayload?.passFolio }
                     )
                 }
+            }
+
+            // Alerta Inmediata de Autorización de Visitas en Garita Principal (2 Fotos)
+            item {
+                ResidentAccessAuthorizationBanner(
+                    residentUnit = currentUser.unitOrDepartment.ifBlank { "Casa 102" },
+                    visitorRepo = visitorRepo
+                )
             }
 
             // Botón y Banner de Emergencia S.O.S. con Transmisión Inmediata vía FCM

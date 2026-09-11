@@ -148,6 +148,7 @@ fun VisitorManagementScreen(
     var selectedFilter by remember { mutableStateOf("TODOS") }
     var showRegisterModal by remember { mutableStateOf(false) }
     var showGenerateTimedTokenDialog by remember { mutableStateOf(false) }
+    var showAdminVisitorTracking by remember { mutableStateOf(false) }
     var activeTimedTokenModal by remember { mutableStateOf<VisitorAccessTokenInfo?>(null) }
     var qrPassToShow by remember { mutableStateOf<VisitorCheckIn?>(null) }
     var detailEntryToShow by remember { mutableStateOf<VisitorCheckIn?>(null) }
@@ -193,6 +194,17 @@ fun VisitorManagementScreen(
 
             matchesSearch && matchesFilter
         }
+    }
+
+    if (showAdminVisitorTracking) {
+        AdminVisitorLogTrackingScreen(
+            db = db,
+            condominiumId = condominiumId,
+            adminName = userName,
+            onBack = { showAdminVisitorTracking = false },
+            modifier = modifier
+        )
+        return
     }
 
     Column(
@@ -424,6 +436,25 @@ fun VisitorManagementScreen(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 12.sp,
                             color = Color.White
+                        )
+                    }
+
+                    Button(
+                        onClick = { showAdminVisitorTracking = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                            .testTag("btn_open_admin_visitor_tracking")
+                    ) {
+                        Icon(Icons.Default.CloudSync, contentDescription = null, tint = NavyDark, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Bitácora Cloud Firestore (Auditoría Administrativa)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = NavyDark
                         )
                     }
                 }

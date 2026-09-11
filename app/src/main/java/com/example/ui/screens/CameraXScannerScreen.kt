@@ -26,6 +26,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
@@ -47,6 +49,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -84,6 +87,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -91,6 +95,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -110,6 +116,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -179,7 +186,7 @@ fun CameraXScannerScreen(
     var activeCondo by remember(selectedCondo) { mutableStateOf(selectedCondo) }
 
     // Repositorios Room
-    val qrPassRepository = remember { QrPassRepository(db.qrPassDao()) }
+    val qrPassRepository = remember { QrPassRepository(db.qrPassDao(), db.residentDao()) }
     val visitorRepository = remember { VisitorCheckInRepository(db.visitorCheckInDao()) }
 
     // Check-ins de Room en tiempo real
@@ -208,6 +215,12 @@ fun CameraXScannerScreen(
     var cameraLensFacing by remember { mutableStateOf(CameraSelector.LENS_FACING_BACK) }
     var isScanningActive by remember { mutableStateOf(true) }
     var isScanSuccessActive by remember { mutableStateOf(false) }
+
+    // Modo Touchless para Residentes
+    var isTouchlessResidentModeEnabled by remember { mutableStateOf(true) }
+    var activeTouchlessResidentResult by remember { mutableStateOf<VerificationResult?>(null) }
+    var isTouchlessWelcomeActive by remember { mutableStateOf(false) }
+    var touchlessCountdownSeconds by remember { mutableStateOf(3) }
 
     // Tap-to-focus animation state
     var tapFocusPoint by remember { mutableStateOf<Offset?>(null) }
@@ -248,16 +261,96 @@ fun CameraXScannerScreen(
         }
     }
 
+    // Función para ejecutar el flujo de acceso Touchless para residentes sin interacción del guardia
+    fun executeTouchlessResidentEntry(result: VerificationResult) {
+        scope.launch {
+            val pass = result.qrPass ?: return@launch
+            val folio = AlphaCoreEngine.generateUniqueFolio("RES")
+            val timestamp = System.currentTimeMillis()
+
+            activeTouchlessResidentResult = result
+            isTouchlessWelcomeActive = true
+            isGateOpeningAnimation = true
+            triggerScanHaptic(context)
+
+            // 1. Guardar automáticamente en Room SQLite (VisitorCheckIn)
+            val checkIn = VisitorCheckIn(
+                folio = folio,
+                visitorName = pass.guestName,
+                visitorDocument = pass.guestDocument.ifBlank { "Credencial QR Residente (Touchless)" },
+                destinationHouse = pass.destinationHouse,
+                passCode = pass.passCode,
+                passTypeLabel = "Residente Titular (Touchless)",
+                vehiclePlate = pass.vehiclePlate ?: "VEHÍCULO AUTORIZADO",
+                status = "CHECKED_IN",
+                timestampMillis = timestamp,
+                guardNotes = "Acceso Touchless sin contacto registrado vía CameraX + ZXing en Garita ${activeCondo.displayName}",
+                hostResidentName = pass.hostResidentName
+            )
+            visitorRepository.insertCheckIn(checkIn)
+
+            // 2. Incrementar contador de accesos en el repositorio
+            qrPassRepository.markPassAsUsed(pass.passCode)
+
+            // 3. Registrar en bitácora de auditoría de Room
+            db.auditLogDao().insertAuditLog(
+                AuditLogEntity(
+                    folio = AlphaCoreEngine.generateUniqueFolio("AUD"),
+                    operatorName = "Sensor CameraX Touchless",
+                    actionType = "TOUCHLESS_RESIDENT_ACCESS",
+                    location = "Garita ${activeCondo.displayName}",
+                    targetEntity = "${pass.guestName} (${pass.destinationHouse})",
+                    changeDetails = "Apertura automática de barrera por validación óptica QR touchless de residente",
+                    resultStatus = "AUTORIZADO_TOUCHLESS",
+                    timestampMillis = timestamp
+                )
+            )
+
+            // 4. Enviar notificación al residente
+            ResidentNotificationManager.notifyCustomVisitorEntry(
+                context = context,
+                guestName = pass.guestName,
+                destinationHouse = pass.destinationHouse,
+                hostResidentName = pass.hostResidentName,
+                passTypeLabel = "Ingreso Touchless Residente",
+                vehiclePlate = pass.vehiclePlate
+            )
+
+            // 5. Animación de elevación de la pluma
+            for (i in 1..20) {
+                gateAnimationProgress = i / 20f
+                delay(35)
+            }
+
+            // 6. Cuenta regresiva visual (3.. 2.. 1.. seg)
+            for (sec in 3 downTo 1) {
+                touchlessCountdownSeconds = sec
+                delay(750)
+            }
+
+            // 7. Cierre suave de la pluma y auto-reactivación del escáner
+            for (i in 20 downTo 0) {
+                gateAnimationProgress = i / 20f
+                delay(20)
+            }
+
+            isGateOpeningAnimation = false
+            gateAnimationProgress = 0f
+            isTouchlessWelcomeActive = false
+            activeTouchlessResidentResult = null
+        }
+    }
+
     // Función principal para verificar y procesar un código QR capturado
     fun processCapturedQrCode(scannedRawCode: String) {
         val cleanCode = QrPayloadParser.extractEntryCode(scannedRawCode)
-        if (cleanCode.isBlank() || isGateOpeningAnimation) return
+        if (cleanCode.isBlank() || isGateOpeningAnimation || isTouchlessWelcomeActive) return
 
         triggerScanHaptic(context)
         isScanSuccessActive = true
 
         scope.launch {
-            delay(500)
+            delay(300)
             isScanSuccessActive = false
 
             // Consultar validación contra el repositorio Room y Firestore con aislamiento del condominio activo
@@ -269,7 +362,22 @@ fun CameraXScannerScreen(
             )
 
             lastScannedCode = cleanCode
-            activeVerificationResult = result
+
+            // Determinar si es un residente válido con modo touchless activo
+            val isResidentPass = result.status == PassStatus.VALID && (
+                result.qrPass?.passType == PassType.RESIDENT_PERMANENT ||
+                cleanCode.startsWith("RES-", ignoreCase = true) ||
+                cleanCode.startsWith("MEDUSA-RESIDENT-", ignoreCase = true) ||
+                cleanCode.startsWith("TOUCHLESS-", ignoreCase = true) ||
+                cleanCode.contains("RESIDENT", ignoreCase = true) ||
+                result.qrPass?.note?.contains("Residente", ignoreCase = true) == true
+            )
+
+            if (isResidentPass && isTouchlessResidentModeEnabled) {
+                executeTouchlessResidentEntry(result)
+            } else {
+                activeVerificationResult = result
+            }
         }
     }
 
@@ -297,7 +405,7 @@ fun CameraXScannerScreen(
                         setAnalyzer(
                             Executors.newSingleThreadExecutor(),
                             QrCodeAnalyzer { scannedCode ->
-                                if (isScanningActive && activeVerificationResult == null) {
+                                if (isScanningActive && activeVerificationResult == null && !isTouchlessWelcomeActive && !isGateOpeningAnimation) {
                                     scope.launch(Dispatchers.Main) {
                                         processCapturedQrCode(scannedCode)
                                     }
@@ -612,11 +720,70 @@ fun CameraXScannerScreen(
                         }
                     }
                 }
+
+                // Control Táctico del Modo Touchless para Residentes
+                Spacer(modifier = Modifier.height(6.dp))
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (isTouchlessResidentModeEnabled) SuccessGreen.copy(alpha = 0.20f) else NavyDark.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, if (isTouchlessResidentModeEnabled) SuccessGreen else Color.Gray),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("touchless_mode_toggle_card")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = if (isTouchlessResidentModeEnabled) SuccessGreen else Color.Gray,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = if (isTouchlessResidentModeEnabled) "MODO TOUCHLESS: ACTIVO" else "MODO TOUCHLESS: MANUAL",
+                                    color = if (isTouchlessResidentModeEnabled) SuccessGreen else Color.LightGray,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = if (isTouchlessResidentModeEnabled)
+                                        "Pase sin contacto y apertura automática de pluma para residentes"
+                                    else
+                                        "Requiere confirmación manual del guardia para cada ingreso",
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isTouchlessResidentModeEnabled,
+                            onCheckedChange = { isTouchlessResidentModeEnabled = it },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = SuccessGreen,
+                                checkedTrackColor = SuccessGreen.copy(alpha = 0.4f),
+                                uncheckedThumbColor = Color.LightGray,
+                                uncheckedTrackColor = Color.DarkGray
+                            ),
+                            modifier = Modifier.testTag("switch_touchless_resident_mode")
+                        )
+                    }
+                }
             }
 
-            // 4. ANIMACIÓN DE APERTURA DE PLUMA (FEEDBACK AL AUTORIZAR)
+            // 4. ANIMACIÓN DE APERTURA DE PLUMA (FEEDBACK AL AUTORIZAR VISITANTES MANUALES)
             AnimatedVisibility(
-                visible = isGateOpeningAnimation,
+                visible = isGateOpeningAnimation && !isTouchlessWelcomeActive,
                 enter = fadeIn() + slideInVertically(),
                 exit = fadeOut() + slideOutVertically(),
                 modifier = Modifier
@@ -681,6 +848,29 @@ fun CameraXScannerScreen(
                             fontWeight = FontWeight.Bold
                         )
                     }
+                }
+            }
+
+            // 4.1 OVERLAY HUD TOUCHLESS EXCLUSIVO PARA RESIDENTES
+            AnimatedVisibility(
+                visible = isTouchlessWelcomeActive && activeTouchlessResidentResult != null,
+                enter = fadeIn() + scaleIn(),
+                exit = fadeOut() + scaleOut(),
+                modifier = Modifier.align(Alignment.Center)
+            ) {
+                activeTouchlessResidentResult?.let { touchlessRes ->
+                    TouchlessResidentAccessOverlay(
+                        result = touchlessRes,
+                        condo = activeCondo,
+                        countdownSeconds = touchlessCountdownSeconds,
+                        gateProgress = gateAnimationProgress,
+                        onDismiss = {
+                            isGateOpeningAnimation = false
+                            gateAnimationProgress = 0f
+                            isTouchlessWelcomeActive = false
+                            activeTouchlessResidentResult = null
+                        }
+                    )
                 }
             }
 
@@ -766,6 +956,50 @@ fun CameraXScannerScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
+                            item {
+                                Surface(
+                                    onClick = {
+                                        // Simular acceso touchless directo de residente
+                                        processCapturedQrCode("RES-TOUCHLESS-104")
+                                    },
+                                    color = NavySurface,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, SuccessGreen),
+                                    modifier = Modifier.testTag("test_chip_resident_touchless_104")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(12.dp))
+                                        Text("👤 Touchless Residente #104", color = SuccessGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+
+                            item {
+                                Surface(
+                                    onClick = {
+                                        // Simular acceso vehicular touchless con placas
+                                        processCapturedQrCode("RES-TOUCHLESS-201")
+                                    },
+                                    color = NavySurface,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, CyanNeon),
+                                    modifier = Modifier.testTag("test_chip_resident_vehicular_201")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(Icons.Default.DirectionsCar, contentDescription = null, tint = CyanNeon, modifier = Modifier.size(12.dp))
+                                        Text("🚗 Vehicular Touchless (MXL-4091)", color = CyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+
                             item {
                                 Surface(
                                     onClick = {
@@ -871,7 +1105,7 @@ fun CameraXScannerScreen(
                 onDismiss = { activeVerificationResult = null },
                 onAuthorizeCheckIn = { passEntity, note, vehiclePlate ->
                     scope.launch {
-                        val folio = if (passEntity.passCode.startsWith("MED-")) passEntity.passCode else AlphaCoreEngine.generateUniqueFolio("ACC")
+                        val folio = if (passEntity.passCode.startsWith("MED-")) passEntity.passCode else AlphaCoreEngine.generateUniqueFolio("MED")
 
                         // 1. Guardar en Room SQLite
                         visitorRepository.insertCheckIn(
@@ -969,7 +1203,7 @@ fun CameraXScannerScreen(
                 },
                 onDenyAccess = { passEntity, reason ->
                     scope.launch {
-                        val folio = AlphaCoreEngine.generateUniqueFolio("DEN")
+                        val folio = AlphaCoreEngine.generateUniqueFolio("MED")
                         visitorRepository.insertCheckIn(
                             VisitorCheckIn(
                                 folio = folio,
@@ -1575,4 +1809,266 @@ fun VisitorCheckInProcessingDialog(
         },
         dismissButton = null
     )
+}
+
+/**
+ * Pantalla superpuesta HUD de bienvenida y autorización automática sin contacto (Touchless)
+ * para residentes verificados por CameraX + ZXing.
+ */
+@Composable
+fun TouchlessResidentAccessOverlay(
+    result: VerificationResult,
+    condo: CondoTarget,
+    countdownSeconds: Int,
+    gateProgress: Float,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val pass = result.qrPass ?: return
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse_transition")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.98f,
+        targetValue = 1.02f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_scale"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.75f))
+            .padding(20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            color = NavyDark,
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(2.dp, SuccessGreen),
+            shadowElevation = 24.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 480.dp)
+                .graphicsLayer {
+                    scaleX = pulseScale
+                    scaleY = pulseScale
+                }
+                .testTag("touchless_resident_overlay_card")
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Cabecera Touchless con Radar Glow
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.size(72.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(SuccessGreen.copy(alpha = 0.20f), CircleShape)
+                            .border(2.dp, SuccessGreen.copy(alpha = 0.6f), CircleShape)
+                    )
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Acceso Touchless Concedido",
+                        tint = SuccessGreen,
+                        modifier = Modifier.size(44.dp)
+                    )
+                }
+
+                // Título y Subtítulo de Autorización
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Surface(
+                        color = SuccessGreen.copy(alpha = 0.18f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, SuccessGreen)
+                    ) {
+                        Text(
+                            text = "⚡ ACCESO TOUCHLESS RESIDENTE",
+                            color = SuccessGreen,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 1.sp,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = "¡BIENVENIDO A CASA!",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                // Tarjeta de Identidad del Residente
+                Surface(
+                    color = NavySurface,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Nombre del Residente
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = GoldPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "RESIDENTE TITULAR",
+                                    color = TextMuted,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = pass.guestName,
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = Color.DarkGray.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+                        // Domicilio / Unidad
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Home,
+                                contentDescription = null,
+                                tint = CyanNeon,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "DESTINO / DOMICILIO",
+                                    color = TextMuted,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = pass.destinationHouse,
+                                    color = CyanNeon,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        // Placas de vehículo si están disponibles
+                        if (!pass.vehiclePlate.isNullOrBlank()) {
+                            HorizontalDivider(color = Color.DarkGray.copy(alpha = 0.5f), thickness = 0.5.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DirectionsCar,
+                                    contentDescription = null,
+                                    tint = SuccessGreen,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "VEHÍCULO AUTORIZADO",
+                                        color = TextMuted,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Placa: ${pass.vehiclePlate}",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Estado de la pluma y sensor
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "PLUMA VEHICULAR ELEVADA",
+                            color = SuccessGreen,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "CARRIL 1 · SENSOR OK",
+                            color = CyanNeon,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    LinearProgressIndicator(
+                        progress = { gateProgress },
+                        color = SuccessGreen,
+                        trackColor = Color.DarkGray,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                    )
+                }
+
+                // Contador de reanudación automática
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Reanudando escáner en ${countdownSeconds}s...",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("btn_dismiss_touchless_overlay")
+                    ) {
+                        Text(
+                            text = "Cerrar ahora",
+                            color = GoldPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

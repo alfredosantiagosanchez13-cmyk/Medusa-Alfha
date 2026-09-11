@@ -15,14 +15,15 @@ object AlphaCoreEngine {
     private val counter = AtomicInteger(1001)
 
     /**
-     * Genera un Folio Único inmutable con estructura oficial: MED-YYYYMMDD-XXXX
+     * Genera un Folio Único inmutable con estructura oficial canónica: MED-YYYYMMDD-XXXX
+     * Todos los eventos (pases, accesos, paquetería, incidencias, supervisión y auditoría) comparten este formato.
      */
     fun generateUniqueFolio(prefix: String = "MED"): String {
         val dateFormat = SimpleDateFormat("yyyyMMdd", Locale.US)
         val datePart = dateFormat.format(Date())
         val seqPart = counter.getAndIncrement() % 10000
         val paddedSeq = String.format(Locale.US, "%04d", seqPart)
-        return "$prefix-$datePart-$paddedSeq"
+        return "MED-$datePart-$paddedSeq"
     }
 
     /**
