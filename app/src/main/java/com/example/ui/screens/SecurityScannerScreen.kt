@@ -13,12 +13,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,7 +29,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.AssignmentLate
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -194,7 +199,7 @@ fun SecurityScannerScreen(
         roomCheckIns.map { it.toVisitorEntry() }
     }
 
-    var currentTab by remember { mutableStateOf(ActiveScreenTab.SCANNER) }
+    var currentTab by remember { mutableStateOf(ActiveScreenTab.DASHBOARD) }
     var activeVerificationResult by remember { mutableStateOf<VerificationResult?>(null) }
     var showQrGeneratorDialog by remember { mutableStateOf(false) }
     var manualCodeInput by remember { mutableStateOf("") }
@@ -251,6 +256,7 @@ fun SecurityScannerScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = NavyDark,
+            contentWindowInsets = WindowInsets.statusBars,
             bottomBar = {
                 Surface(
                     modifier = Modifier
@@ -343,120 +349,215 @@ fun SecurityScannerScreen(
             ) {
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Brand Hero Banner with Golden Crest, Slogan & Live Status
-                BrandHeaderHeroBanner(
-                    onOpenPhilosophyModal = { showPhilosophyDialog = true }
-                )
+                if (currentTab == ActiveScreenTab.DASHBOARD || currentTab == ActiveScreenTab.CASETA) {
+                    // Brand Hero Banner with Golden Crest, Slogan & Live Status
+                    BrandHeaderHeroBanner(
+                        onOpenPhilosophyModal = { showPhilosophyDialog = true }
+                    )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                // Quick Security Action Bar (Panic Button & Battery Status)
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = NavySurface,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-                ) {
-                    Row(
+                    // Quick Security Action Bar (Panic Button & Battery Status)
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = NavySurface,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(SuccessGreen, CircleShape)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Garita Principal • Room DB",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                com.example.ui.components.ConnectivityStatusPill(showPendingBadge = true)
+
+                                IconButton(
+                                    onClick = { showFirebaseCloudDialog = true },
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .background(GoldPrimary.copy(alpha = 0.15f), CircleShape)
+                                        .testTag("firebase_cloud_sync_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CloudSync,
+                                        contentDescription = "Firebase Cloud Sync",
+                                        tint = GoldPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = onSignOut,
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .background(NavyCard, CircleShape)
+                                        .border(1.dp, GoldPrimary.copy(alpha = 0.35f), CircleShape)
+                                        .testTag("auth_sign_out_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Logout,
+                                        contentDescription = "Cerrar Sesión / Salir",
+                                        tint = GoldPrimary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+
+                                PulsingPanicButton(
+                                    isActive = activePanicAlert != null,
+                                    onClick = {
+                                        if (activePanicAlert == null) {
+                                            activePanicAlert = com.example.ui.components.SampleCondoUnits.getDefaultPanicEvent()
+                                            scope.launch {
+                                                EmergencyLocationEngine.triggerEmergencyAlert(
+                                                    context = context,
+                                                    db = db,
+                                                    emergencyType = "PÁNICO S.O.S.",
+                                                    locationName = "Manzana A - Casa 104",
+                                                    reportedBy = "Guardia de Garita 1",
+                                                    reportedByRole = "GUARDIA",
+                                                    details = "Alerta de pánico activada desde la consola táctica de Caseta."
+                                                )
+                                            }
+                                            Toast.makeText(context, "🚨 ALERTA DE PÁNICO ACTIVADA CON GEOLOCALIZACIÓN GPS", Toast.LENGTH_LONG).show()
+                                        } else {
+                                            activePanicAlert = null
+                                            Toast.makeText(context, "Alerta de pánico desactivada", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                )
+
+                                com.example.ui.components.BatteryIndicatorPill(showDetailedLabel = false)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                } else {
+                    // Header compacto para submódulos de trabajo que maximiza el espacio vertical y permite salir siempre
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(bottom = 8.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        color = NavySurface,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.25f))
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(SuccessGreen, CircleShape)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Control Garita Principal • Fuente Única Room",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            com.example.ui.components.ConnectivityStatusPill(showPendingBadge = true)
-
-                            IconButton(
-                                onClick = { showFirebaseCloudDialog = true },
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .background(GoldPrimary.copy(alpha = 0.15f), CircleShape)
-                                    .testTag("firebase_cloud_sync_button")
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.CloudSync,
-                                    contentDescription = "Firebase Cloud Sync",
-                                    tint = GoldPrimary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = onSignOut,
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .background(NavyCard, CircleShape)
-                                    .border(1.dp, GoldPrimary.copy(alpha = 0.35f), CircleShape)
-                                    .testTag("auth_sign_out_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Logout,
-                                    contentDescription = "Cerrar Sesión / Salir",
-                                    tint = GoldPrimary,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                            }
-
-                            PulsingPanicButton(
-                                isActive = activePanicAlert != null,
-                                onClick = {
-                                    if (activePanicAlert == null) {
-                                        activePanicAlert = com.example.ui.components.SampleCondoUnits.getDefaultPanicEvent()
-                                        scope.launch {
-                                            EmergencyLocationEngine.triggerEmergencyAlert(
-                                                context = context,
-                                                db = db,
-                                                emergencyType = "PÁNICO S.O.S.",
-                                                locationName = "Manzana A - Casa 104",
-                                                reportedBy = "Guardia de Garita 1",
-                                                reportedByRole = "GUARDIA",
-                                                details = "Alerta de pánico activada desde la consola táctica de Caseta."
-                                            )
-                                        }
-                                        Toast.makeText(context, "🚨 ALERTA DE PÁNICO ACTIVADA CON GEOLOCALIZACIÓN GPS", Toast.LENGTH_LONG).show()
-                                    } else {
-                                        activePanicAlert = null
-                                        Toast.makeText(context, "Alerta de pánico desactivada", Toast.LENGTH_SHORT).show()
-                                    }
+                                IconButton(
+                                    onClick = { currentTab = ActiveScreenTab.DASHBOARD },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Volver al Dashboard",
+                                        tint = GoldPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
                                 }
-                            )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Column {
+                                    Text(
+                                        text = currentTab.label,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "MEDUSA ALFHA • Garita En Línea",
+                                        fontSize = 9.sp,
+                                        color = CyanNeon,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
 
-                            com.example.ui.components.BatteryIndicatorPill(showDetailedLabel = false)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                com.example.ui.components.ConnectivityStatusPill(showPendingBadge = false)
+                                PulsingPanicButton(
+                                    isActive = activePanicAlert != null,
+                                    onClick = {
+                                        if (activePanicAlert == null) {
+                                            activePanicAlert = com.example.ui.components.SampleCondoUnits.getDefaultPanicEvent()
+                                            scope.launch {
+                                                EmergencyLocationEngine.triggerEmergencyAlert(
+                                                    context = context,
+                                                    db = db,
+                                                    emergencyType = "PÁNICO S.O.S.",
+                                                    locationName = "Manzana A - Casa 104",
+                                                    reportedBy = "Guardia de Garita 1",
+                                                    reportedByRole = "GUARDIA",
+                                                    details = "Alerta de pánico activada desde la consola táctica de Caseta."
+                                                )
+                                            }
+                                            Toast.makeText(context, "🚨 ALERTA DE PÁNICO ACTIVADA", Toast.LENGTH_LONG).show()
+                                        } else {
+                                            activePanicAlert = null
+                                            Toast.makeText(context, "Alerta de pánico desactivada", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-            when (currentTab) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    when (currentTab) {
                 ActiveScreenTab.RESIDENT_DASHBOARD -> {
                     ResidentDashboardScreen()
                 }
 
                 ActiveScreenTab.DASHBOARD -> {
-                    MedusaTacticalDashboardHub(
+                    MainDashboardScreen(
                         db = db,
                         onNavigateToTab = { currentTab = it },
-                        onTriggerScan = { currentTab = ActiveScreenTab.SCANNER }
+                        onTriggerScan = { currentTab = ActiveScreenTab.SCANNER },
+                        onOpenQrGenerator = { showQrGeneratorDialog = true }
                     )
                 }
 
@@ -530,7 +631,8 @@ fun SecurityScannerScreen(
                     VehicleAccessControlHub(
                         db = db,
                         userRole = "CASETA",
-                        showNewVehicleFab = true
+                        showNewVehicleFab = true,
+                        onBack = { currentTab = ActiveScreenTab.DASHBOARD }
                     )
                 }
 
@@ -599,6 +701,7 @@ fun SecurityScannerScreen(
                 }
             }
         }
+    }
 
         // Active Pass Verification Sheet Modal
         activeVerificationResult?.let { result ->

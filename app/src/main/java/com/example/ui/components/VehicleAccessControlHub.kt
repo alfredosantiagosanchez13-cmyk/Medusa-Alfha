@@ -72,11 +72,19 @@ fun VehicleAccessControlHub(
     unitFilter: String? = null,
     userRole: String = "ADMINISTRACION",
     showNewVehicleFab: Boolean = true,
+    onBack: (() -> Unit)? = null,
     onStatsChanged: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val currentUser by AlfhaSecurityContext.currentUser.collectAsState()
+
+    // Manejo de botón Atrás de Android para regresar al Dashboard
+    if (onBack != null) {
+        androidx.activity.compose.BackHandler(enabled = true) {
+            onBack()
+        }
+    }
 
     // Base de datos reactiva (Fuente Única de Verdad)
     val allVehicles by db.vehicleDao().getAllVehicles().collectAsState(initial = emptyList())
@@ -175,42 +183,42 @@ fun VehicleAccessControlHub(
             .testTag("vehicle_access_control_hub")
     ) {
         // ==========================================
-        // 1. SCORECARD SUPERIOR (KPIs OPERATIVOS)
+        // 1. SCORECARD SUPERIOR COMPACTO (KPIs OPERATIVOS)
         // ==========================================
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             // Card 1: Vehículos en Sitio
             Surface(
                 modifier = Modifier.weight(1f),
                 color = NavyCard,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, if (insideVehicles.isNotEmpty()) SuccessGreen.copy(alpha = 0.6f) else NavyCardBorder)
             ) {
-                Column(modifier = Modifier.padding(10.dp)) {
+                Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("EN SITIO", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
+                        Text("EN SITIO", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = SuccessGreen)
                         Box(
                             modifier = Modifier
-                                .size(8.dp)
+                                .size(6.dp)
                                 .clip(CircleShape)
                                 .background(SuccessGreen)
                         )
                     }
                     Text(
                         text = "${insideVehicles.size}",
-                        fontSize = 20.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Black,
                         color = Color.White
                     )
-                    Text("Actualmente dentro", fontSize = 9.sp, color = TextMuted)
+                    Text("En condominio", fontSize = 8.sp, color = TextMuted, maxLines = 1)
                 }
             }
 
@@ -218,18 +226,18 @@ fun VehicleAccessControlHub(
             Surface(
                 modifier = Modifier.weight(1f),
                 color = NavyCard,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NavyCardBorder)
             ) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Text("HOY", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyanNeon)
+                Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)) {
+                    Text("HOY", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = CyanNeon)
                     Text(
                         text = "$entriesTodayCount / $exitsTodayCount",
-                        fontSize = 18.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
-                    Text("Entradas / Salidas", fontSize = 9.sp, color = TextMuted)
+                    Text("Entr / Sal", fontSize = 8.sp, color = TextMuted, maxLines = 1)
                 }
             }
 
@@ -237,18 +245,18 @@ fun VehicleAccessControlHub(
             Surface(
                 modifier = Modifier.weight(1f),
                 color = NavyCard,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, NavyCardBorder)
             ) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Text("PADRÓN", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = GoldPrimary)
+                Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)) {
+                    Text("PADRÓN", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = GoldPrimary)
                     Text(
                         text = "${allVehicles.size}",
-                        fontSize = 20.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Black,
                         color = Color.White
                     )
-                    Text("Vehículos registrados", fontSize = 9.sp, color = TextMuted)
+                    Text("Padrón total", fontSize = 8.sp, color = TextMuted, maxLines = 1)
                 }
             }
 
@@ -256,119 +264,136 @@ fun VehicleAccessControlHub(
             Surface(
                 modifier = Modifier.weight(1f),
                 color = if (unauthorizedCount > 0) ErrorRed.copy(alpha = 0.15f) else NavyCard,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(8.dp),
                 border = BorderStroke(1.dp, if (unauthorizedCount > 0) ErrorRed.copy(alpha = 0.6f) else NavyCardBorder)
             ) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    Text("ALERTAS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (unauthorizedCount > 0) ErrorRed else TextMuted)
+                Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)) {
+                    Text("ALERTAS", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = if (unauthorizedCount > 0) ErrorRed else TextMuted)
                     Text(
                         text = "$unauthorizedCount",
-                        fontSize = 20.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Black,
                         color = if (unauthorizedCount > 0) ErrorRed else Color.White
                     )
-                    Text("No autorizados", fontSize = 9.sp, color = TextMuted)
+                    Text("Sin acceso", fontSize = 8.sp, color = TextMuted, maxLines = 1)
                 }
             }
         }
 
         // ==========================================
-        // 2. ACCIONES RÁPIDAS Y SELECTOR DE PESTAÑAS
+        // 2. SELECTOR DE PESTAÑAS RESPONSIVO CON BADGES
         // ==========================================
-        Row(
+        LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 10.dp),
+                .padding(bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            VehicleHubTab.values().forEach { tab ->
+            items(VehicleHubTab.values()) { tab ->
                 val isSel = selectedTab == tab
+                val countBadge = when (tab) {
+                    VehicleHubTab.ACTIVE_INSIDE -> "${insideVehicles.size}"
+                    VehicleHubTab.REGISTRY -> "${allVehicles.size}"
+                    VehicleHubTab.ACCESS_LOGS -> "${accessLogs.size}"
+                    else -> null
+                }
                 Surface(
                     onClick = { selectedTab = tab },
                     color = if (isSel) CyanNeon.copy(alpha = 0.2f) else NavySurface,
                     border = BorderStroke(1.dp, if (isSel) CyanNeon else NavyCardBorder),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.weight(1f)
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Icon(
                             imageVector = tab.icon,
                             contentDescription = tab.label,
                             tint = if (isSel) CyanNeon else TextMuted,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = tab.label,
-                            fontSize = 10.sp,
-                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSel) Color.White else TextMuted,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            fontSize = 11.sp,
+                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSel) Color.White else TextMuted
                         )
+                        if (countBadge != null) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = if (isSel) CyanNeon else NavyCard
+                            ) {
+                                Text(
+                                    text = countBadge,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSel) NavyDark else Color.White,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
 
         // ==========================================
-        // 3. BARRA DE BÚSQUEDA Y BOTONES DE ACCIÓN
+        // 3. BARRA DE BÚSQUEDA COMPLETA Y BOTONES DE ACCIÓN
         // ==========================================
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Buscar por placa, marca, unidad o titular...", fontSize = 12.sp, color = TextMuted) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Buscar", tint = CyanNeon, modifier = Modifier.size(18.dp)) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(Icons.Default.Close, contentDescription = "Limpiar", tint = TextMuted, modifier = Modifier.size(16.dp))
+                    }
+                }
+            },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .testTag("vehicle_search_field"),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = CyanNeon,
+                unfocusedBorderColor = NavyCardBorder,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White,
+                focusedContainerColor = NavySurface,
+                unfocusedContainerColor = NavySurface
+            ),
+            shape = RoundedCornerShape(8.dp)
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Fila de botones de acción rápida equilibrados (50% cada uno)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 10.dp),
+                .padding(bottom = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Buscar por placa, unidad, titular...", fontSize = 12.sp, color = TextMuted) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Buscar", tint = CyanNeon, modifier = Modifier.size(18.dp)) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Limpiar", tint = TextMuted, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                },
-                singleLine = true,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(50.dp)
-                    .testTag("vehicle_search_field"),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = CyanNeon,
-                    unfocusedBorderColor = NavyCardBorder,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedContainerColor = NavySurface,
-                    unfocusedContainerColor = NavySurface
-                ),
-                shape = RoundedCornerShape(8.dp)
-            )
-
-            // Botón Terminal Rápida Garita
             Button(
                 onClick = { showScanTerminalDialog = true },
                 colors = ButtonDefaults.buttonColors(containerColor = CyanNeon),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier
-                    .height(50.dp)
+                    .weight(1f)
+                    .height(42.dp)
                     .testTag("btn_terminal_garita")
             ) {
-                Icon(Icons.Default.QrCodeScanner, contentDescription = "Escanear", tint = NavyDark, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Validar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                Icon(Icons.Default.QrCodeScanner, contentDescription = "Escanear", tint = NavyDark, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Validar Acceso", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NavyDark)
             }
 
-            // Botón Alta Vehículo (si tiene permiso)
             if (showNewVehicleFab) {
                 Button(
                     onClick = {
@@ -378,76 +403,83 @@ fun VehicleAccessControlHub(
                     colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier
-                        .height(50.dp)
+                        .weight(1f)
+                        .height(42.dp)
                         .testTag("btn_add_vehicle")
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Agregar", tint = NavyDark, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Vehículo", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NavyDark)
+                    Icon(Icons.Default.Add, contentDescription = "Agregar", tint = NavyDark, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("+ Vehículo", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = NavyDark)
                 }
             }
         }
 
         // ==========================================
-        // 4. CONTENIDO PRINCIPAL POR PESTAÑA
+        // 4. CONTENIDO PRINCIPAL POR PESTAÑA (EXPANDIDO CON WEIGHT)
         // ==========================================
-        when (selectedTab) {
-            VehicleHubTab.ACTIVE_INSIDE -> {
-                VehiclesInsideView(
-                    vehiclesInside = filteredInsideVehicles,
-                    onRegisterExit = { log ->
-                        selectedLogForExit = log
-                    },
-                    onViewDetail = { log ->
-                        selectedLogForDetail = log
-                    }
-                )
-            }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            when (selectedTab) {
+                VehicleHubTab.ACTIVE_INSIDE -> {
+                    VehiclesInsideView(
+                        vehiclesInside = filteredInsideVehicles,
+                        onRegisterExit = { log ->
+                            selectedLogForExit = log
+                        },
+                        onViewDetail = { log ->
+                            selectedLogForDetail = log
+                        }
+                    )
+                }
 
-            VehicleHubTab.REGISTRY -> {
-                VehicleRegistryView(
-                    vehicles = filteredVehicles,
-                    selectedStatus = selectedStatusFilter,
-                    onStatusChange = { selectedStatusFilter = it },
-                    onEditVehicle = { vehicle ->
-                        editingVehicle = vehicle
-                        showRegisterVehicleDialog = true
-                    },
-                    onDeleteVehicle = { vehicle ->
-                        scope.launch {
-                            VehicleAccessControlEngine.deleteVehicle(db, vehicle.plate, currentUser.name)
-                            Toast.makeText(context, "Vehículo ${vehicle.plate} eliminado del padrón", Toast.LENGTH_SHORT).show()
+                VehicleHubTab.REGISTRY -> {
+                    VehicleRegistryView(
+                        vehicles = filteredVehicles,
+                        selectedStatus = selectedStatusFilter,
+                        onStatusChange = { selectedStatusFilter = it },
+                        onEditVehicle = { vehicle ->
+                            editingVehicle = vehicle
+                            showRegisterVehicleDialog = true
+                        },
+                        onDeleteVehicle = { vehicle ->
+                            scope.launch {
+                                VehicleAccessControlEngine.deleteVehicle(db, vehicle.plate, currentUser.name)
+                                Toast.makeText(context, "Vehículo ${vehicle.plate} eliminado del padrón", Toast.LENGTH_SHORT).show()
+                                onStatsChanged()
+                            }
+                        },
+                        onViewDetail = { vehicle ->
+                            selectedVehicleForDetail = vehicle
+                        }
+                    )
+                }
+
+                VehicleHubTab.ACCESS_LOGS -> {
+                    VehicleAccessLogsView(
+                        logs = filteredLogs,
+                        onViewDetail = { log ->
+                            selectedLogForDetail = log
+                        }
+                    )
+                }
+
+                VehicleHubTab.SCAN_TERMINAL -> {
+                    VehicleGateTerminalView(
+                        db = db,
+                        onVehicleProcessed = {
                             onStatsChanged()
                         }
-                    },
-                    onViewDetail = { vehicle ->
-                        selectedVehicleForDetail = vehicle
-                    }
-                )
-            }
+                    )
+                }
 
-            VehicleHubTab.ACCESS_LOGS -> {
-                VehicleAccessLogsView(
-                    logs = filteredLogs,
-                    onViewDetail = { log ->
-                        selectedLogForDetail = log
-                    }
-                )
-            }
-
-            VehicleHubTab.SCAN_TERMINAL -> {
-                VehicleGateTerminalView(
-                    db = db,
-                    onVehicleProcessed = {
-                        onStatsChanged()
-                    }
-                )
-            }
-
-            VehicleHubTab.REPORT -> {
-                VehicleReportView(
-                    db = db
-                )
+                VehicleHubTab.REPORT -> {
+                    VehicleReportView(
+                        db = db
+                    )
+                }
             }
         }
     }

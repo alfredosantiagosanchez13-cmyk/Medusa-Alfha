@@ -23,7 +23,8 @@ object AlphaCoreEngine {
         val datePart = dateFormat.format(Date())
         val seqPart = counter.getAndIncrement() % 10000
         val paddedSeq = String.format(Locale.US, "%04d", seqPart)
-        return "MED-$datePart-$paddedSeq"
+        val cleanPrefix = if (prefix.isBlank()) "MED" else prefix.trim().uppercase()
+        return "$cleanPrefix-$datePart-$paddedSeq"
     }
 
     /**
