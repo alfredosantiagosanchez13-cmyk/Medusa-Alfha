@@ -35,8 +35,10 @@ class AmenityReminderReceiver : BroadcastReceiver() {
         val unitId = intent.getStringExtra("UNIT_ID") ?: "Unidad"
         val bookingTimeMillis = intent.getLongExtra("BOOKING_TIME", System.currentTimeMillis())
         val reminderType = intent.getStringExtra("REMINDER_TYPE") ?: "ONE_HOUR"
+        val folio = intent.getStringExtra("FOLIO") ?: ""
+        val guestName = intent.getStringExtra("GUEST_NAME") ?: ""
 
-        Log.i("AmenityReminderReceiver", "Alarma recibida para reserva #$bookingId en $amenityName ($reminderType)")
+        Log.i("AmenityReminderReceiver", "Alarma recibida para reserva #$bookingId en $amenityName ($reminderType) - Folio: $folio")
 
         if (bookingId != -1L) {
             when (reminderType) {
@@ -57,7 +59,9 @@ class AmenityReminderReceiver : BroadcastReceiver() {
                         amenityName = amenityName,
                         residentName = residentName,
                         unitId = unitId,
-                        bookingTimeMillis = bookingTimeMillis
+                        bookingTimeMillis = bookingTimeMillis,
+                        folio = folio,
+                        guestName = guestName
                     )
                 }
             }
@@ -177,12 +181,18 @@ object AmenityReminderManager {
     }
 
     /**
-     * Mantiene retrocompatibilidad con el recordatorio de 15 minutos.
+     * Mantiene retrocompatibilidad con el recordatorio de 15 minutos y soporta alertas de pase de invitado.
      */
-    fun schedule15MinReminder(context: Context, booking: AmenityBooking) {
+    fun schedule15MinReminder(
+        context: Context,
+        booking: AmenityBooking,
+        folio: String = booking.folio,
+        guestName: String = ""
+    ) {
         createNotificationChannel(context)
 
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val resolvedFolio = if (folio.isNotBlank()) folio else booking.folio
         val intent = Intent(context, AmenityReminderReceiver::class.java).apply {
             putExtra("BOOKING_ID", booking.id)
             putExtra("AMENITY_NAME", booking.amenityName)
@@ -190,6 +200,8 @@ object AmenityReminderManager {
             putExtra("UNIT_ID", booking.unitId)
             putExtra("BOOKING_TIME", booking.bookingTimeMillis)
             putExtra("REMINDER_TYPE", "15_MIN")
+            putExtra("FOLIO", resolvedFolio)
+            putExtra("GUEST_NAME", guestName)
         }
 
         val requestCode = get15MinPendingIntentId(booking.id)
@@ -201,19 +213,49 @@ object AmenityReminderManager {
         )
 
         val triggerAtMillis = booking.bookingTimeMillis - (15 * 60 * 1000L)
-        if (triggerAtMillis > System.currentTimeMillis()) {
+        val now = System.currentTimeMillis()
+        if (triggerAtMillis > now) {
             try {
-                alarmManager.setAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerAtMillis,
-                    pendingIntent
-                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (alarmManager.canScheduleExactAlarms()) {
+                        alarmManager.setExactAndAllowWhileIdle(
+                            AlarmManager.RTC_WAKEUP,
+                            triggerAtMillis,
+                            pendingIntent
+                        )
+                    } else {
+                        alarmManager.setAndAllowWhileIdle(
+                            AlarmManager.RTC_WAKEUP,
+                            triggerAtMillis,
+                            pendingIntent
+                        )
+                    }
+                } else {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAtMillis,
+                        pendingIntent
+                    )
+                }
+                Log.i(TAG, "⏰ Alerta de 15 minutos programada para $resolvedFolio (${booking.amenityName})")
             } catch (e: Exception) {
-                alarmManager.set(
-                    AlarmManager.RTC_WAKEUP,
-                    triggerAtMillis,
-                    pendingIntent
-                )
+                try {
+                    alarmManager.set(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerAtMillis,
+                        pendingIntent
+                    )
+                } catch (ex: Exception) {
+                    Log.e(TAG, "Error programando alarma 15 min: ${ex.message}")
+                }
+            }
+        } else if (booking.bookingTimeMillis > now) {
+            // El turno inicia en menos de 15 minutos; disparo inmediato
+            try {
+                alarmManager.set(AlarmManager.RTC_WAKEUP, now + 1500L, pendingIntent)
+                Log.i(TAG, "Turno en menos de 15 min. Disparo inmediato programado para $resolvedFolio")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error en disparo inmediato: ${e.message}")
             }
         }
     }
@@ -285,7 +327,9 @@ object AmenityReminderManager {
         amenityName: String,
         residentName: String,
         unitId: String,
-        bookingTimeMillis: Long
+        bookingTimeMillis: Long,
+        folio: String = "",
+        guestName: String = ""
     ) {
         createNotificationChannel(context)
 
@@ -301,16 +345,25 @@ object AmenityReminderManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val folioDisplay = if (folio.isNotBlank()) folio else "RSV-$bookingId"
+        val guestInfo = if (guestName.isNotBlank()) "\nInvitado Asociado: $guestName" else ""
+
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("⏰ Recordatorio de Reserva (En 15 min)")
-            .setContentText("$amenityName iniciará a las $timeStr h para $residentName ($unitId)")
+            .setContentTitle("⏰ Turno en 15 min: $amenityName [$folioDisplay]")
+            .setContentText("Folio: $folioDisplay | $amenityName a las $timeStr h para $unitId")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
-                    "Su reserva en $amenityName para $residentName ($unitId) comenzará a las $timeStr hrs (en 15 minutos). Por favor diríjase al control de garita o punto de acceso."
+                    "🔔 ALERTA INTELIGENTE DE ÁREA COMÚN (EN 15 MINUTOS)\n\n" +
+                    "• Folio de Confirmación: $folioDisplay\n" +
+                    "• Área: $amenityName\n" +
+                    "• Horario de Inicio: $timeStr hrs\n" +
+                    "• Titular: $residentName ($unitId)$guestInfo\n\n" +
+                    "Recuerde presentar su pase QR en garita para el ingreso autorizado."
                 )
             )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .build()

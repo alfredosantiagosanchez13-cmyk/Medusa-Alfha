@@ -279,9 +279,9 @@ fun MedusaMainDashboard(
             }
 
             MedusaRole.RESIDENTE -> {
-                // Vista Residente (NO muestra banner de emergencia de caseta ni herramientas de guardia)
-                ResidentDashboardFallbackContent(
-                    session = currentSession,
+                // Portal Móvil del Condómino Enclavado con RBAC
+                PortalResidentesScreen(
+                    activationViewModel = activationViewModel,
                     onLogoutClick = {
                         activationViewModel.logout()
                         onSignOut()

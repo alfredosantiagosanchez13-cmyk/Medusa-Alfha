@@ -37,16 +37,22 @@ import com.example.data.vehicle.VehicleDao
 import com.example.data.sync.SyncQueueDao
 import com.example.data.sync.SyncQueueEntity
 import com.example.data.vehicle.VehicleEntity
+import com.example.data.finance.MaintenancePaymentDao
+import com.example.data.finance.MaintenancePaymentEntity
 import com.example.data.profile.UserProfileDao
 import com.example.data.profile.UserProfileEntity
 import com.example.data.visitor.VisitorCheckIn
 import com.example.data.visitor.VisitorCheckInDao
+import com.example.data.visitor.VisitorPassDao
+import com.example.data.visitor.VisitorPassEntity
 
 @Database(
     entities = [
         AmenityBooking::class,
         CommonAreaBooking::class,
         VisitorCheckIn::class,
+        VisitorPassEntity::class,
+        MaintenancePaymentEntity::class,
         UserProfileEntity::class,
         AiGuardChatLog::class,
         QrPassRoomEntity::class,
@@ -66,13 +72,15 @@ import com.example.data.visitor.VisitorCheckInDao
         SyncQueueEntity::class,
         FieldValidationTestEntity::class
     ],
-    version = 21,
+    version = 22,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun amenityBookingDao(): AmenityBookingDao
     abstract fun commonAreaBookingDao(): CommonAreaBookingDao
     abstract fun visitorCheckInDao(): VisitorCheckInDao
+    abstract fun visitorPassDao(): VisitorPassDao
+    abstract fun maintenancePaymentDao(): MaintenancePaymentDao
     abstract fun userProfileDao(): UserProfileDao
     abstract fun aiGuardChatLogDao(): AiGuardChatLogDao
     abstract fun qrPassDao(): QrPassDao
