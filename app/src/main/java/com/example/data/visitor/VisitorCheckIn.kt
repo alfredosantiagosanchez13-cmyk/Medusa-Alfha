@@ -42,6 +42,12 @@ data class VisitorCheckIn(
     val authorizedUnitNumber: String
         get() = destinationHouse
 
+    val arrivalTime: Long
+        get() = timestampMillis
+
+    val accessStatus: String
+        get() = status
+
     val formattedTime: String
         get() = SimpleDateFormat("HH:mm:ss - dd/MM/yyyy", Locale.getDefault()).format(Date(timestampMillis))
 
@@ -83,5 +89,9 @@ data class VisitorCheckIn(
             residentNotes = residentNotes,
             hostResidentName = hostResidentName
         )
+    }
+
+    fun toVisitorLogEntity(condoId: String = "PRADOS_1"): VisitorLogEntity {
+        return VisitorLogEntity.fromVisitorCheckIn(this, condoId)
     }
 }

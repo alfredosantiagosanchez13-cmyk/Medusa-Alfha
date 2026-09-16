@@ -9,8 +9,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.auth.ActivationKey
 import com.example.data.auth.MedusaFinancialAccessGuard
 import com.example.data.auth.MedusaRole
-import com.example.data.auth.MedusaSessionData
 import com.example.data.auth.MedusaSessionPreferences
+import com.example.data.auth.UserSession
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.Dispatchers
@@ -82,8 +82,11 @@ class ActivationViewModel(
     private val _uiState = MutableStateFlow<ActivationUiState>(ActivationUiState.Idle)
     val uiState: StateFlow<ActivationUiState> = _uiState.asStateFlow()
 
-    private val _currentSession = MutableStateFlow<MedusaSessionData?>(null)
-    val currentSession: StateFlow<MedusaSessionData?> = _currentSession.asStateFlow()
+    private val _currentSession = MutableStateFlow<UserSession?>(null)
+    val currentSession: StateFlow<UserSession?> = _currentSession.asStateFlow()
+
+    private val _currentRole = MutableStateFlow<MedusaRole>(sessionPreferences.getCurrentRole())
+    val currentRole: StateFlow<MedusaRole> = _currentRole.asStateFlow()
 
     init {
         checkExistingSession()
@@ -97,6 +100,7 @@ class ActivationViewModel(
         val existingSession = sessionPreferences.getSessionData()
         if (existingSession != null && existingSession.isActive) {
             _currentSession.value = existingSession
+            _currentRole.value = existingSession.role
             // Restablece la política de seguridad nativa para el rol recordado
             MedusaFinancialAccessGuard.applyRoleSecurityPolicy(existingSession.role)
             _uiState.value = ActivationUiState.Success(
@@ -205,16 +209,18 @@ class ActivationViewModel(
                 }
 
                 // 8. Actualizar sesión en memoria
-                val newSession = MedusaSessionData(
-                    keyId = activationKey.keyId,
-                    role = medusaRole,
-                    condominiumId = activationKey.condominiumId,
-                    assignedUnit = activationKey.assignedUnit,
+                val newSession = UserSession(
+                    activationKey = activationKey.keyId,
+                    currentRole = medusaRole,
+                    condominiumId = activationKey.condominiumId.ifBlank { "PRADOS_1" },
+                    assignedUnitId = activationKey.assignedUnit ?: "",
+                    condominiumName = activationKey.condominiumName.ifBlank { "Los Prados 1" },
                     isActive = true,
                     isFinancialBlocked = isFinancialBlocked,
-                    activatedAtMillis = System.currentTimeMillis()
+                    timestampMillis = System.currentTimeMillis()
                 )
                 _currentSession.value = newSession
+                _currentRole.value = medusaRole
 
                 // 9. Actualizar estado reactivo para avisar visualmente del éxito al usuario
                 val successMessage = when (medusaRole) {
@@ -286,8 +292,43 @@ class ActivationViewModel(
     fun logout() {
         sessionPreferences.clearSession()
         _currentSession.value = null
+        _currentRole.value = MedusaRole.UNASSIGNED
         _uiState.value = ActivationUiState.Idle
         Log.i(TAG, "👋 Sesión purgada exitosamente.")
+    }
+
+    /**
+     * Activa directamente la terminal como Residente tras autenticarse con Firebase Auth.
+     */
+    fun activateAsResidentFromFirebaseAuth(
+        resident: com.example.data.resident.ResidentEntity,
+        condominiumId: String = "PRADOS_1"
+    ) {
+        val session = UserSession(
+            activationKey = "FIREBASE-AUTH-${resident.id}",
+            currentRole = MedusaRole.RESIDENTE,
+            condominiumId = condominiumId,
+            assignedUnitId = resident.unitId,
+            isActive = true,
+            isFinancialBlocked = false,
+            timestampMillis = System.currentTimeMillis()
+        )
+        sessionPreferences.saveSession(session)
+        _currentSession.value = session
+        _currentRole.value = MedusaRole.RESIDENTE
+        _uiState.value = ActivationUiState.Success(
+            activationKey = ActivationKey(
+                keyId = "FIREBASE-AUTH-${resident.id}",
+                role = "RESIDENTE",
+                condominiumId = condominiumId,
+                assignedUnit = resident.unitId,
+                isActive = true
+            ),
+            role = MedusaRole.RESIDENTE,
+            message = "Sesión de residente acreditada con Firebase Auth",
+            isFinancialBlocked = false
+        )
+        Log.i(TAG, "🎉 Terminal activada como Residente vía Firebase Auth: ${resident.fullName} (${resident.unitId})")
     }
 
     /**

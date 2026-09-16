@@ -8,6 +8,7 @@ import com.example.data.alerts.OperationalAlertDao
 import com.example.data.alerts.OperationalAlertEntity
 import com.example.data.audit.AuditLogDao
 import com.example.data.audit.AuditLogEntity
+import com.example.data.audit.SecurityAuditDao
 import com.example.data.auth.AlfhaUserDao
 import com.example.data.auth.AlfhaUserEntity
 import com.example.data.chat.AiGuardChatLog
@@ -43,6 +44,8 @@ import com.example.data.profile.UserProfileDao
 import com.example.data.profile.UserProfileEntity
 import com.example.data.visitor.VisitorCheckIn
 import com.example.data.visitor.VisitorCheckInDao
+import com.example.data.visitor.VisitorLogDao
+import com.example.data.visitor.VisitorLogEntity
 import com.example.data.visitor.VisitorPassDao
 import com.example.data.visitor.VisitorPassEntity
 
@@ -51,6 +54,7 @@ import com.example.data.visitor.VisitorPassEntity
         AmenityBooking::class,
         CommonAreaBooking::class,
         VisitorCheckIn::class,
+        VisitorLogEntity::class,
         VisitorPassEntity::class,
         MaintenancePaymentEntity::class,
         UserProfileEntity::class,
@@ -72,13 +76,14 @@ import com.example.data.visitor.VisitorPassEntity
         SyncQueueEntity::class,
         FieldValidationTestEntity::class
     ],
-    version = 22,
+    version = 23,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun amenityBookingDao(): AmenityBookingDao
     abstract fun commonAreaBookingDao(): CommonAreaBookingDao
     abstract fun visitorCheckInDao(): VisitorCheckInDao
+    abstract fun visitorLogDao(): VisitorLogDao
     abstract fun visitorPassDao(): VisitorPassDao
     abstract fun maintenancePaymentDao(): MaintenancePaymentDao
     abstract fun userProfileDao(): UserProfileDao
@@ -87,6 +92,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun incidentDao(): IncidentDao
     abstract fun supervisionAuditDao(): SupervisionAuditDao
     abstract fun auditLogDao(): AuditLogDao
+    abstract fun securityAuditDao(): SecurityAuditDao
     abstract fun operationalAlertDao(): OperationalAlertDao
     abstract fun alfhaUserDao(): AlfhaUserDao
     abstract fun smartNotificationDao(): SmartNotificationDao
@@ -104,6 +110,8 @@ abstract class AppDatabase : RoomDatabase() {
 
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        fun getInstance(context: Context): AppDatabase = getDatabase(context)
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {

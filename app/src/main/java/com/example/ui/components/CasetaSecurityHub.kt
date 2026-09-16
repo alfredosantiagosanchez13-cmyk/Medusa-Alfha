@@ -45,6 +45,12 @@ import com.example.data.passes.toQrPassEntity
 import com.example.data.resident.ResidentDirectoryEngine
 import com.example.data.resident.ResidentEntity
 import com.example.data.supervision.SupervisionAuditEntity
+import com.example.data.location.GeoAlphaRoundTracker
+import com.example.data.supervision.GeoAlphaTourEngine
+import com.example.data.supervision.ActiveGeoAlphaTourState
+import com.example.data.supervision.GeoAlphaPoint
+import com.example.data.supervision.GeoAlphaDetection
+import com.example.data.supervision.GeoAlphaTourReport
 import com.example.data.vehicle.VehicleEntity
 import com.example.data.visitor.VisitorCheckIn
 import com.example.data.visitor.VisitorCheckInRepository
@@ -2184,7 +2190,7 @@ fun CasetaIncidentesIsolatedSection(
 }
 
 // =========================================================================
-// 7. RONDINES GPS AISLADOS POR CONDOMINIO
+// 7. RONDINES GPS AISLADOS POR CONDOMINIO (RECORRIDO VIRTUAL GEO-ALPHA)
 // =========================================================================
 @Composable
 fun CasetaRondinesIsolatedSection(
@@ -2195,103 +2201,560 @@ fun CasetaRondinesIsolatedSection(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val checkpoints = remember(condo) {
-        when (condo) {
-            CondoTarget.PARAISO -> MultiCondoDirectoryHub.checkpointsParaiso
-            CondoTarget.PRADOS_1 -> MultiCondoDirectoryHub.checkpointsPrados1
-            CondoTarget.PRADOS_2 -> MultiCondoDirectoryHub.checkpointsPrados2
-            CondoTarget.PRADOS_3 -> MultiCondoDirectoryHub.checkpointsPrados3
-        }
-    }
+    val trackerTour by GeoAlphaRoundTracker.activeTour.collectAsState()
+    val registeredGeofencesCount by GeoAlphaRoundTracker.registeredGeofenceCount.collectAsState()
+    var localTourOverride by remember(condo) { mutableStateOf<ActiveGeoAlphaTourState?>(null) }
+    val currentTour = trackerTour ?: localTourOverride
+    var guardNameInput by remember(condo) { mutableStateOf("Oficial de Seguridad (${condo.shortTag})") }
+    var completedReport by remember { mutableStateOf<GeoAlphaTourReport?>(null) }
+    var showSupervisorDialog by remember { mutableStateOf(false) }
+    var supervisorNotesInput by remember { mutableStateOf("") }
+    var showIncidentDialog by remember { mutableStateOf(false) }
+    var incidentDescInput by remember { mutableStateOf("") }
 
-    var checkedPoints by remember(condo) { mutableStateOf(setOf<String>()) }
+    val allAudits by auditDao.getAllAuditsFlow().collectAsState(initial = emptyList())
+    val recentCondoAudits = remember(allAudits, condo) {
+        allAudits.filter { it.areaName.contains(condo.displayName, ignoreCase = true) || it.checkpointName.contains(condo.displayName, ignoreCase = true) }
+            .take(5)
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = NavyCard),
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.35f))
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("🚶 CHECKPOINTS DE RONDÍN · ${condo.displayName.uppercase()}", color = CyanNeon, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    Text("Progreso: ${checkedPoints.size} de ${checkpoints.size} puntos verificados", color = GoldPrimary, fontSize = 11.sp)
+        if (currentTour == null) {
+            // Estado 1: No hay ronda activa -> Configuración e inicio de Recorrido Virtual Geo-Alpha
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = NavyCard),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.5f))
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("🛡️ RECORRIDO VIRTUAL GEO-ALPHA", color = CyanNeon, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Surface(color = CyanNeon.copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp)) {
+                                Text(condo.displayName.uppercase(), color = CyanNeon, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp))
+                            }
+                        }
 
-                    LinearProgressIndicator(
-                        progress = { if (checkpoints.isNotEmpty()) checkedPoints.size.toFloat() / checkpoints.size.toFloat() else 0f },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(8.dp),
-                        color = CyanNeon,
-                        trackColor = NavyDark
-                    )
+                        Text(
+                            "Principio Rector: \"El sistema registra al guardia, no el guardia al sistema\". " +
+                            "Inicia tu ronda desde cualquier geopunto autorizado y recorre en el orden que prefieras. " +
+                            "MEDUSA detecta automáticamente tu paso mediante geocercas satelitales.",
+                            color = TextMuted,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
 
-                    checkpoints.forEach { cp ->
-                        val isDone = checkedPoints.contains(cp)
-                        Surface(
+                        OutlinedTextField(
+                            value = guardNameInput,
+                            onValueChange = { guardNameInput = it },
+                            label = { Text("Nombre del Guardia / Supervisor en Turno") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = CyanNeon,
+                                unfocusedBorderColor = GoldPrimary.copy(alpha = 0.4f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Button(
                             onClick = {
-                                checkedPoints = if (isDone) checkedPoints - cp else checkedPoints + cp
+                                GeoAlphaRoundTracker.startTracking(
+                                    context = context,
+                                    condo = condo,
+                                    guardName = guardNameInput,
+                                    onSuccess = {
+                                        Toast.makeText(context, "🚶 Ronda Geo-Alpha iniciada con geocercas satelitales", Toast.LENGTH_SHORT).show()
+                                    },
+                                    onFailure = {
+                                        localTourOverride = GeoAlphaTourEngine.startTour(condo, guardNameInput)
+                                        Toast.makeText(context, "🚶 Ronda iniciada en modo local redundante", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
                             },
-                            color = if (isDone) SuccessGreen.copy(alpha = 0.15f) else NavySurface,
+                            colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Iniciar Recorrido Geo-Alpha", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+                    }
+                }
+            }
+
+            // Catálogo de Geopuntos Autorizados para este condominio
+            item {
+                Text("📍 GEOPUNTOS SATELITALES AUTORIZADOS (${GeoAlphaTourEngine.getPointsForCondo(condo).size})", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+
+            items(GeoAlphaTourEngine.getPointsForCondo(condo)) { pt ->
+                Surface(
+                    color = NavySurface,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(pt.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("${pt.area} • Geocerca: ±${pt.radiusMeters.toInt()}m", color = TextMuted, fontSize = 10.sp)
+                            Text(pt.description, color = CyanNeon.copy(alpha = 0.8f), fontSize = 10.sp)
+                        }
+                        Surface(color = GoldPrimary.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
+                            Text("OBLIGATORIO", color = GoldPrimary, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+                        }
+                    }
+                }
+            }
+
+            // Historial reciente de rondas en Room
+            if (recentCondoAudits.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("📜 ÚLTIMAS RONDAS CERTIFICADAS EN ROOM (${recentCondoAudits.size})", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                items(recentCondoAudits) { audit ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = NavyCard),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, if (audit.statusCondition == "OPTIMO") SuccessGreen.copy(alpha = 0.4f) else WarningOrange.copy(alpha = 0.4f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(audit.folio, color = GoldPrimary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                Surface(
+                                    color = if (audit.statusCondition == "OPTIMO") SuccessGreen.copy(alpha = 0.2f) else WarningOrange.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(audit.statusCondition, color = if (audit.statusCondition == "OPTIMO") SuccessGreen else WarningOrange, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                                }
+                            }
+                            Text(audit.checkpointName, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                            Text("Guardia: ${audit.supervisorName} • ${audit.commitmentDate}", color = TextMuted, fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+
+        } else {
+            // Estado 2: Ronda Geo-Alpha EN EJECUCIÓN ACTIVA
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = NavyCard),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.5.dp, CyanNeon)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text("RONDA GEO-ALPHA EN CURSO", color = CyanNeon, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text("Folio: ${currentTour.tourFolio}", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Surface(color = CyanNeon.copy(alpha = 0.15f), shape = RoundedCornerShape(4.dp)) {
+                                    Text(
+                                        "🛰️ Google Play Services: ${currentTour.allAuthorizedPoints.size} Geocercas Activas",
+                                        color = CyanNeon,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Surface(color = SuccessGreen.copy(alpha = 0.2f), shape = RoundedCornerShape(6.dp)) {
+                                Text("🟢 ACTIVA", color = SuccessGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Guardia: ${currentTour.guardName}", color = Color.White, fontSize = 11.sp)
+                            Text("Tiempo: ${currentTour.durationMinutes} min", color = TextMuted, fontSize = 11.sp)
+                        }
+
+                        // Barra de progreso y porcentaje de cobertura
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Cobertura de Geopuntos", color = TextMuted, fontSize = 10.sp)
+                                Text(
+                                    "${currentTour.coveredDetections.size}/${currentTour.allAuthorizedPoints.size} (${currentTour.coveragePercentage}%)",
+                                    color = if (currentTour.coveragePercentage == 100) SuccessGreen else GoldPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { currentTour.coveragePercentage.toFloat() / 100f },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp),
+                                color = if (currentTour.coveragePercentage == 100) SuccessGreen else CyanNeon,
+                                trackColor = NavyDark
+                            )
+                        }
+
+                        // Ruta Realmente Realizada (Secuencia Dinámica)
+                        Surface(
+                            color = NavyDark,
                             shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, if (isDone) SuccessGreen else Color.White.copy(alpha = 0.08f)),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("🗺️ RUTA REALMENTE REALIZADA (SECUENCIA CRONOLÓGICA):", color = GoldPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                if (currentTour.coveredDetections.isEmpty()) {
+                                    Text("Aún no se detecta paso por ningún geopunto. Puedes pasar por cualquiera de ellos en cualquier orden.", color = TextMuted, fontSize = 10.sp)
+                                } else {
+                                    currentTour.coveredDetections.forEach { det ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text("${det.sequenceOrder}. ${det.pointName}", color = SuccessGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            Text(det.formattedTime, color = CyanNeon, fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Botón de Incidencia durante la Ronda
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { showIncidentDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = ErrorRed.copy(alpha = 0.8f), contentColor = Color.White),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
                             ) {
-                                Text(cp, color = if (isDone) SuccessGreen else Color.White, fontSize = 12.sp, fontWeight = if (isDone) FontWeight.Bold else FontWeight.Normal)
-                                Icon(
-                                    imageVector = if (isDone) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                    contentDescription = null,
-                                    tint = if (isDone) SuccessGreen else Color.Gray,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("🚨 Incidencia en Ronda", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
+                }
+            }
 
-                    Button(
-                        onClick = {
-                            if (checkedPoints.size == checkpoints.size) {
-                                val folio = AlphaCoreEngine.generateUniqueFolio("RND")
-                                scope.launch {
-                                    auditDao.insertAudit(
-                                        SupervisionAuditEntity(
-                                            folio = folio,
-                                            supervisorName = "Guardia ${condo.shortTag}",
-                                            checkpointName = "Todos los puntos (${checkpoints.size})",
-                                            areaName = condo.displayName,
-                                            statusCondition = "OPTIMO",
-                                            findingsDescription = "Rondín 100% completado en ${condo.displayName}",
-                                            riskLevel = "BAJO",
-                                            correctiveActionRequired = "Ninguna",
-                                            responsibleParty = "Seguridad ${condo.shortTag}",
-                                            commitmentDate = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date()),
-                                            isClosed = true
-                                        )
-                                    )
-                                    checkedPoints = emptySet()
-                                    Toast.makeText(context, "✅ Rondín completado y registrado para ${condo.displayName}", Toast.LENGTH_LONG).show()
+            // Lista de Puntos con Detección Automática y Simulación Táctica
+            item {
+                Text("📍 ESTADO DE GEOPUNTOS (${currentTour.coveredDetections.size}/${currentTour.allAuthorizedPoints.size})", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+
+            items(currentTour.allAuthorizedPoints) { pt ->
+                val detection = currentTour.coveredDetections.find { it.pointId == pt.id }
+                val isCovered = detection != null
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = if (isCovered) SuccessGreen.copy(alpha = 0.12f) else NavyCard),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, if (isCovered) SuccessGreen else Color.White.copy(alpha = 0.12f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(pt.name, color = if (isCovered) SuccessGreen else Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text(pt.area, color = TextMuted, fontSize = 10.sp)
+                            }
+                            if (isCovered) {
+                                Surface(color = SuccessGreen, shape = RoundedCornerShape(4.dp)) {
+                                    Text("PASO #${detection?.sequenceOrder}", color = NavyDark, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
                                 }
                             } else {
-                                Toast.makeText(context, "Faltan checkpoints por marcar", Toast.LENGTH_SHORT).show()
+                                Surface(color = WarningOrange.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {
+                                    Text("PENDIENTE", color = WarningOrange, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                }
+                            }
+                        }
+
+                        if (isCovered && detection != null) {
+                            Text("⏱️ Detectado a las ${detection.formattedTime} • Fix GPS: ${String.format(Locale.US, "%.4f, %.4f", detection.latitude, detection.longitude)}", color = CyanNeon, fontSize = 10.sp)
+                            Text(detection.findings, color = TextMuted, fontSize = 10.sp)
+                        } else {
+                            Text(pt.description, color = TextMuted, fontSize = 10.sp)
+                            // Botón de paso automático/simulación sin QR
+                            Button(
+                                onClick = {
+                                    if (trackerTour != null) {
+                                        GeoAlphaRoundTracker.simulateGeofencePass(context, pt.id)
+                                        Toast.makeText(context, "📍 Geocerca detectada: ${pt.name}", Toast.LENGTH_SHORT).show()
+                                    } else if (localTourOverride != null) {
+                                        val (updated, newDet) = GeoAlphaTourEngine.simulatePassByPoint(localTourOverride!!, pt.id)
+                                        localTourOverride = updated
+                                        if (newDet != null) {
+                                            Toast.makeText(context, "📍 Geopunto detectado: ${pt.name}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = NavySurface, contentColor = CyanNeon),
+                                border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.LocationOn, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("🚶 Registrar Paso Satelital (Geocerca ±${pt.radiusMeters.toInt()}m)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Sección de Cierre y Verificación Estricta
+            item {
+                Spacer(modifier = Modifier.height(6.dp))
+                if (currentTour.isComplete) {
+                    // Ronda 100% completada o autorizada
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val report = if (trackerTour != null) {
+                                    GeoAlphaRoundTracker.finalizeRound(context, db)
+                                } else if (localTourOverride != null) {
+                                    GeoAlphaTourEngine.finalizeTour(context, db, localTourOverride!!)
+                                } else null
+
+                                completedReport = report
+                                localTourOverride = null
+                                Toast.makeText(context, "✅ Ronda finalizada y certificada en Room (Folio ${report?.tourFolio})", Toast.LENGTH_LONG).show()
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
+                        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = NavyDark),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
                     ) {
-                        Text("Finalizar y Registrar Rondín GPS", fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.CheckCircle, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            if (currentTour.coveragePercentage == 100) "Finalizar y Certificar Ronda (100% Cobertura)" else "Finalizar Ronda con Autorización de Supervisor",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                } else {
+                    // Faltan puntos obligatorios
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = NavyCard),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, WarningOrange.copy(alpha = 0.6f))
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = WarningOrange, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("RONDA INCOMPLETA (${currentTour.pendingPoints.size} PUNTOS PENDIENTES)", color = WarningOrange, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                            Text(
+                                "De acuerdo al protocolo MEDUSA ALFHA, todos los puntos obligatorios deben quedar cubiertos para certificar la ronda. " +
+                                "Si existe alguna contingencia física justificada, un supervisor puede autorizar el cierre anticipado.",
+                                color = TextMuted,
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp
+                            )
+                            Button(
+                                onClick = { showSupervisorDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = WarningOrange, contentColor = NavyDark),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Autorización de Supervisor para Cierre Anticipado", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    // Modal de Incidencia Vinculada a la Ronda
+    if (showIncidentDialog && currentTour != null) {
+        val cur = currentTour
+        AlertDialog(
+            onDismissRequest = { showIncidentDialog = false },
+            containerColor = NavyCard,
+            title = { Text("🚨 LEVANTAR INCIDENCIA EN RONDA", color = ErrorRed, fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Folio de Ronda: ${cur.tourFolio}", color = GoldPrimary, fontSize = 11.sp)
+                    OutlinedTextField(
+                        value = incidentDescInput,
+                        onValueChange = { incidentDescInput = it },
+                        label = { Text("Descripción de novedad o riesgo encontrado") },
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (incidentDescInput.isNotBlank()) {
+                            val incFolio = AlphaCoreEngine.generateUniqueFolio("MED")
+                            val incident = IncidentEntity(
+                                folio = incFolio,
+                                rawTranscript = incidentDescInput.trim(),
+                                category = IncidentCategory.SEGURIDAD_EMERGENCIA,
+                                priority = IncidentPriority.ALTA,
+                                location = "${condo.displayName} · Ronda Geo-Alpha",
+                                aiSummary = "Incidencia detectada durante la ronda ${cur.tourFolio}: ${incidentDescInput.trim()}",
+                                recommendedAction = "Atención inmediata por guardia en turno",
+                                reportedBy = cur.guardName,
+                                reportedByRole = "GUARDIA_RONDA",
+                                status = "REGISTRADO"
+                            )
+                            scope.launch {
+                                db.incidentDao().insertIncident(incident)
+                                if (trackerTour != null) {
+                                    GeoAlphaRoundTracker.linkIncident(incident)
+                                } else if (localTourOverride != null) {
+                                    localTourOverride = GeoAlphaTourEngine.linkIncident(localTourOverride!!, incident)
+                                }
+                                showIncidentDialog = false
+                                incidentDescInput = ""
+                                Toast.makeText(context, "🚨 Incidencia vinculada a la ronda (Folio $incFolio)", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = Color.White)
+                ) {
+                    Text("Registrar y Vincular", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showIncidentDialog = false }) {
+                    Text("Cancelar", color = TextMuted)
+                }
+            }
+        )
+    }
+
+    // Modal de Autorización de Supervisor
+    if (showSupervisorDialog && currentTour != null) {
+        val cur = currentTour
+        AlertDialog(
+            onDismissRequest = { showSupervisorDialog = false },
+            containerColor = NavyCard,
+            title = { Text("🔑 AUTORIZACIÓN DE SUPERVISOR", color = GoldPrimary, fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Ronda con ${cur.pendingPoints.size} puntos pendientes en ${condo.displayName}.", color = TextMuted, fontSize = 11.sp)
+                    OutlinedTextField(
+                        value = supervisorNotesInput,
+                        onValueChange = { supervisorNotesInput = it },
+                        label = { Text("Motivo / Justificación de Cierre Anticipado") },
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (supervisorNotesInput.isNotBlank()) {
+                            if (trackerTour != null) {
+                                GeoAlphaRoundTracker.authorizeSupervisorOverride(supervisorNotesInput.trim())
+                            } else if (localTourOverride != null) {
+                                localTourOverride = GeoAlphaTourEngine.authorizeSupervisorOverride(localTourOverride!!, supervisorNotesInput.trim())
+                            }
+                            showSupervisorDialog = false
+                            supervisorNotesInput = ""
+                            Toast.makeText(context, "🔑 Cierre autorizado por supervisión", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = WarningOrange, contentColor = NavyDark)
+                ) {
+                    Text("Confirmar Autorización", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSupervisorDialog = false }) {
+                    Text("Cancelar", color = TextMuted)
+                }
+            }
+        )
+    }
+
+    // Modal de Certificado Ejecutivo Emitido
+    completedReport?.let { rep ->
+        AlertDialog(
+            onDismissRequest = { completedReport = null },
+            containerColor = NavyCard,
+            shape = RoundedCornerShape(16.dp),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("INFORME EJECUTIVO DE RONDA", color = GoldPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(color = NavyDark, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Folio Oficial: ${rep.tourFolio}", color = GoldPrimary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Condominio: ${rep.condo.displayName}", color = Color.White, fontSize = 11.sp)
+                            Text("Guardia: ${rep.guardName}", color = TextMuted, fontSize = 11.sp)
+                            Text("Duración: ${rep.durationFormatted} • Cobertura: ${rep.coveragePercentage}%", color = CyanNeon, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            Text("Puntos Cubiertos: ${rep.coveredCount} / ${rep.totalCheckpoints}", color = SuccessGreen, fontSize = 11.sp)
+                            if (rep.omittedCount > 0) {
+                                Text("Puntos Omitidos: ${rep.omittedCount}", color = WarningOrange, fontSize = 11.sp)
+                            }
+                        }
+                    }
+
+                    Text("Ruta Realmente Realizada:", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    rep.actualRouteTraversed.forEach { d ->
+                        Text("#${d.sequenceOrder}. ${d.pointName} (${d.formattedTime})", color = Color.White, fontSize = 10.sp)
+                    }
+
+                    Surface(color = Color.Black.copy(alpha = 0.3f), shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth()) {
+                        Text("Firma Criptográfica SHA-256:\n${rep.integrityHashSha256}", color = TextMuted, fontSize = 9.sp, modifier = Modifier.padding(6.dp))
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { completedReport = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanNeon, contentColor = NavyDark)
+                ) {
+                    Text("Cerrar Certificado", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 }
 

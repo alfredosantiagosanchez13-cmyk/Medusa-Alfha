@@ -144,6 +144,7 @@ import com.example.ui.theme.NavySurface
 import com.example.ui.theme.SuccessGreen
 import com.example.ui.components.CasetaSecurityHub
 import com.example.ui.components.MedusaTacticalDashboardHub
+import com.example.ui.components.ResidentFirebaseAuthBarrier
 import com.example.ui.theme.TextMuted
 import com.example.utils.ResidentNotificationManager
 import com.example.data.fcm.FcmNotificationManager
@@ -581,25 +582,32 @@ fun SecurityScannerScreen(
                 }
 
                 ActiveScreenTab.SCANNER -> {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        if (activePanicAlert != null) {
-                            OperationalEmergencyMapView(
+                    ResidentFirebaseAuthBarrier(
+                        featureName = "Escáner QR de Accesos",
+                        featureDescription = "Exclusivo para residentes acreditados y registrados mediante Firebase Auth.",
+                        db = db,
+                        onDismissOrBack = { currentTab = ActiveScreenTab.DASHBOARD }
+                    ) { resident ->
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            if (activePanicAlert != null) {
+                                OperationalEmergencyMapView(
+                                    db = db,
+                                    userRole = "GUARDIA",
+                                    onEmergencyResolvedOrClosed = {
+                                        activePanicAlert = null
+                                        FcmNotificationManager.clearActiveEmergencyAlert()
+                                    }
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+
+                            CameraXScannerScreen(
                                 db = db,
-                                userRole = "GUARDIA",
-                                onEmergencyResolvedOrClosed = {
-                                    activePanicAlert = null
-                                    FcmNotificationManager.clearActiveEmergencyAlert()
+                                onBackToDashboard = {
+                                    currentTab = ActiveScreenTab.DASHBOARD
                                 }
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
                         }
-
-                        CameraXScannerScreen(
-                            db = db,
-                            onBackToDashboard = {
-                                currentTab = ActiveScreenTab.DASHBOARD
-                            }
-                        )
                     }
                 }
 
@@ -610,12 +618,19 @@ fun SecurityScannerScreen(
                 }
 
                 ActiveScreenTab.GENERATOR -> {
-                    com.example.ui.screens.QrGeneratorScreen(
-                        onSimulateScan = { passCode ->
-                            currentTab = ActiveScreenTab.SCANNER
-                            verifyPassCode(passCode)
-                        }
-                    )
+                    ResidentFirebaseAuthBarrier(
+                        featureName = "Generador de Pases QR",
+                        featureDescription = "Generación de pases QR segura reservada para residentes con Firebase Auth.",
+                        db = db,
+                        onDismissOrBack = { currentTab = ActiveScreenTab.DASHBOARD }
+                    ) { resident ->
+                        com.example.ui.screens.QrGeneratorScreen(
+                            onSimulateScan = { passCode ->
+                                currentTab = ActiveScreenTab.SCANNER
+                                verifyPassCode(passCode)
+                            }
+                        )
+                    }
                 }
 
                 ActiveScreenTab.HISTORY -> {
@@ -662,10 +677,17 @@ fun SecurityScannerScreen(
                 }
 
                 ActiveScreenTab.AMENITIES -> {
-                    AmenityBookingHub(
+                    ResidentFirebaseAuthBarrier(
+                        featureName = "Reserva de Amenidades",
+                        featureDescription = "Gestión y reservación de áreas comunes exclusivo para residentes con Firebase Auth.",
                         db = db,
-                        canManage = true
-                    )
+                        onDismissOrBack = { currentTab = ActiveScreenTab.DASHBOARD }
+                    ) { resident ->
+                        AmenityBookingHub(
+                            db = db,
+                            canManage = true
+                        )
+                    }
                 }
 
                 ActiveScreenTab.PACKAGES -> {

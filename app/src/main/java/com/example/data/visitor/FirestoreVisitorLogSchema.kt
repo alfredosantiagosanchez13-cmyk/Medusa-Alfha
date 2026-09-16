@@ -60,6 +60,13 @@ data class FirestoreVisitorLog(
     val photoPath: String? = null,
     val syncedAtMillis: Long = System.currentTimeMillis()
 ) {
+    // Propiedades explícitas solicitadas: visitor name, arrival time y access status
+    val arrivalTime: Long
+        get() = timestampMillis
+
+    val accessStatus: String
+        get() = status
+
     val formattedTime: String
         get() = SimpleDateFormat("HH:mm:ss - dd/MM/yyyy", Locale.getDefault()).format(Date(timestampMillis))
 
@@ -68,11 +75,13 @@ data class FirestoreVisitorLog(
 
     /**
      * Serializa la entidad al mapa estructurado de Firestore garantizando
-     * el esquema exacto solicitado: timestamp, visitorName, authorizedUnitNumber.
+     * el esquema exacto solicitado: visitorName, arrivalTime, accessStatus, etc.
      */
     fun toMap(): Map<String, Any?> = hashMapOf(
         "folio" to folio,
         "visitorName" to visitorName,
+        "arrivalTime" to timestampMillis,
+        "accessStatus" to status,
         "authorizedUnitNumber" to authorizedUnitNumber,
         "destinationHouse" to authorizedUnitNumber,
         "unitNumber" to authorizedUnitNumber,
@@ -115,10 +124,40 @@ data class FirestoreVisitorLog(
         )
     }
 
+    fun toVisitorLogEntity(localId: Long = 0): VisitorLogEntity {
+        return VisitorLogEntity.fromFirestoreModel(this, localId)
+    }
+
     companion object {
         /**
+         * Constructor auxiliar para instanciar directamente con visitorName, arrivalTime y accessStatus.
+         */
+        fun create(
+            visitorName: String,
+            arrivalTime: Long = System.currentTimeMillis(),
+            accessStatus: String = "CHECKED_IN",
+            authorizedUnitNumber: String = "",
+            condominiumId: String = "PRADOS_1",
+            folio: String = AlphaCoreEngine.generateUniqueFolio("MED")
+        ): FirestoreVisitorLog {
+            return FirestoreVisitorLog(
+                folio = folio,
+                visitorName = visitorName,
+                authorizedUnitNumber = authorizedUnitNumber,
+                timestamp = Timestamp(Date(arrivalTime)),
+                timestampMillis = arrivalTime,
+                condominiumId = condominiumId,
+                status = accessStatus
+            )
+        }
+
+        fun fromVisitorLogEntity(entity: VisitorLogEntity): FirestoreVisitorLog {
+            return entity.toFirestoreModel()
+        }
+
+        /**
          * Parsea un DocumentSnapshot de Firestore al modelo fuertemente tipado FirestoreVisitorLog,
-         * extrayendo robustamente timestamp, visitorName y authorizedUnitNumber.
+         * extrayendo robustamente visitorName, arrivalTime, accessStatus, timestamp y authorizedUnitNumber.
          */
         fun fromDocumentSnapshot(doc: DocumentSnapshot, defaultCondoId: String = "PRADOS_1"): FirestoreVisitorLog? {
             return try {
@@ -129,9 +168,10 @@ data class FirestoreVisitorLog(
                     ?: doc.getString("unitNumber")
                     ?: "Unidad Desconocida"
 
-                // Extraer timestamp nativo de Firestore o calcular desde timestampMillis
+                // Extraer arrivalTime nativo o calcular desde timestampMillis/timestamp
                 val fsTimestamp = doc.getTimestamp("timestamp")
-                val millis = doc.getLong("timestampMillis")
+                val millis = doc.getLong("arrivalTime")
+                    ?: doc.getLong("timestampMillis")
                     ?: fsTimestamp?.toDate()?.time
                     ?: System.currentTimeMillis()
                 val resolvedTimestamp = fsTimestamp ?: Timestamp(Date(millis))
@@ -145,7 +185,7 @@ data class FirestoreVisitorLog(
                 val passCode = doc.getString("passCode") ?: ""
                 val passType = doc.getString("passTypeLabel") ?: "Visita"
                 val plate = doc.getString("vehiclePlate")
-                val status = doc.getString("status") ?: "CHECKED_IN"
+                val status = doc.getString("accessStatus") ?: doc.getString("status") ?: "CHECKED_IN"
                 val guardName = doc.getString("guardName") ?: "Agente Caseta"
                 val guardNotes = doc.getString("guardNotes")
                 val residentNotes = doc.getString("residentNotes")

@@ -9,6 +9,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.app.Application
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -17,25 +18,31 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.rememberNavController
 import com.example.data.booking.AppDatabase
 import com.example.data.firebase.FirebaseAuthManager
 import com.example.data.sync.OfflineSyncEngine
 import com.example.ui.components.DebugDiagnosticOverlay
+import com.example.ui.navigation.MedusaNavGraph
 import com.example.ui.screens.LoginScreen
 import com.example.ui.screens.SecurityScannerScreen
 import com.example.ui.theme.MEDUSAALFHATheme
 import com.example.data.notifications.SmartNotificationHub
 import com.example.ui.theme.NavyDark
+import com.example.ui.viewmodel.ActivationViewModel
 import com.example.utils.AmenityReminderManager
 import com.example.utils.ResidentNotificationManager
 import kotlinx.coroutines.Dispatchers
@@ -112,26 +119,19 @@ class MainActivity : FragmentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = NavyDark
                 ) {
-                    val authManager = remember { FirebaseAuthManager(this@MainActivity) }
-                    var isAuthenticated by remember {
-                        mutableStateOf(authManager.currentUser != null)
-                    }
+                    val context = LocalContext.current
+                    val activationViewModel: ActivationViewModel = viewModel(
+                        factory = ActivationViewModel.provideFactory(context.applicationContext as Application)
+                    )
+                    val currentSession by activationViewModel.currentSession.collectAsState()
+                    val navController = rememberNavController()
 
                     Box(modifier = Modifier.fillMaxSize()) {
-                        if (!isAuthenticated) {
-                            LoginScreen(
-                                onLoginSuccess = {
-                                    isAuthenticated = true
-                                }
-                            )
-                        } else {
-                            SecurityScannerScreen(
-                                onSignOut = {
-                                    authManager.signOut()
-                                    isAuthenticated = false
-                                }
-                            )
-                        }
+                        MedusaNavGraph(
+                            navController = navController,
+                            currentSession = currentSession,
+                            activationViewModel = activationViewModel
+                        )
 
                         DebugDiagnosticOverlay(
                             modifier = Modifier

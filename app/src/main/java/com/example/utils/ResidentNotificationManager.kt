@@ -352,6 +352,45 @@ object ResidentNotificationManager {
         notificationManager?.notify(notificationId, notification)
     }
 
+    fun notifyGeofenceCheckpointDetected(
+        context: Context,
+        pointName: String,
+        areaName: String,
+        sequence: Int,
+        totalPoints: Int,
+        tourFolio: String
+    ) {
+        val notificationId = (pointName.hashCode() xor tourFolio.hashCode()).let { if (it < 0) -it else it }
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("NAVIGATE_TO", "CASETA_HUB")
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+        )
+
+        val text = "Punto #$sequence verificado: $pointName ($areaName). Cobertura: $sequence/$totalPoints."
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("📍 Geocerca Detectada [$tourFolio]")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.notify(notificationId, notification)
+    }
+
     fun notifySecurityEmergencyAlert(
         context: Context,
         payload: com.example.data.fcm.EmergencyAlertFcmPayload

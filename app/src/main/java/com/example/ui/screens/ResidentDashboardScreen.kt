@@ -62,6 +62,7 @@ import com.example.ui.components.ResidentEmergencyTopBarButton
 import com.example.ui.components.ResidentEmergencyBannerCard
 import com.example.ui.components.ResidentEmergencyDialog
 import com.example.ui.components.ResidentAccessAuthorizationBanner
+import com.example.ui.components.ProximityGateControlCard
 import com.example.ui.components.TimeLimitedDigitalPassModal
 import com.example.ui.components.TimedTokenStatusBadge
 import com.example.ui.components.VisitorAccessTokenInfo
@@ -263,6 +264,11 @@ fun ResidentDashboardScreen(
                     condominiumName = "Residencial Los Prados",
                     onOpenEmergencyDialog = { showEmergencyDialog = true }
                 )
+            }
+
+            // Monitoreo de Proximidad y Apertura Automática de Portón (GPS + BLE/Wi-Fi)
+            item {
+                ProximityGateControlCard()
             }
 
             // 1. Tarjeta de Identidad y Aislamiento del Residente

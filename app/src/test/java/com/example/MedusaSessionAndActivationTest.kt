@@ -145,7 +145,14 @@ class MedusaSessionAndActivationTest {
         assertEquals(ActivationUiState.Loading, loadingState)
 
         val successState = ActivationUiState.Success(
-            activationKey = ActivationKey("KEY-1", "GUARDIA_CASETA", "CONDO-A", null, true),
+            activationKey = ActivationKey(
+                keyId = "KEY-1",
+                role = "GUARDIA_CASETA",
+                condominiumId = "CONDO-A",
+                condominiumName = "Los Prados 1",
+                assignedUnit = null,
+                isActive = true
+            ),
             role = MedusaRole.GUARDIA_CASETA,
             message = "Activado exitosamente",
             isFinancialBlocked = true

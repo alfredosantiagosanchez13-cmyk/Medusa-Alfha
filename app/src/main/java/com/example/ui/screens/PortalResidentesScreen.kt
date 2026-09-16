@@ -13,6 +13,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -41,6 +43,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.auth.ResidentBiometricGate
 import com.example.data.auth.MedusaRole
 import com.example.data.auth.MedusaSessionData
+import com.example.data.core.AlphaCoreEngine
 import com.example.data.booking.AmenityBooking
 import com.example.data.booking.AppDatabase
 import com.example.data.finance.MaintenancePaymentEntity
@@ -50,9 +53,11 @@ import com.example.data.visitor.VisitorPassEntity
 import com.example.data.visitor.VisitorPassRepository
 import com.example.scanner.PassType
 import com.example.ui.components.MaintenancePaymentHistorySection
+import com.example.ui.components.ProximityGateControlCard
 import com.example.ui.components.PaymentReceiptDetailDialog
 import com.example.ui.components.SmartBookingAlerts
 import com.example.ui.components.VisitorHistoryLogList
+import com.example.ui.components.ResidentFirebaseAuthBarrier
 import com.example.ui.components.scheduleSmartBookingPassAlert
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ActivationViewModel
@@ -72,6 +77,7 @@ import java.util.*
 private enum class ResidentPortalTab(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     MI_RESIDENCIA("Mi Residencia", Icons.Default.AccountBalanceWallet),
     GENERAR_QR("Pase QR", Icons.Default.QrCode2),
+    ACCESO_AUTO("Acceso Auto", Icons.Default.GpsFixed),
     RESERVAS("Amenidades", Icons.Default.EventSeat)
 }
 
@@ -410,28 +416,52 @@ fun PortalResidentesScreen(
                         )
                     }
                     ResidentPortalTab.GENERAR_QR -> {
-                        ResidentQrPassesTabContent(
-                            assignedUnit = assignedUnit,
-                            condominiumId = condominiumId,
-                            cachedPasses = activeCachedPasses,
-                            visitorHistory = visitorHistory,
-                            isOnline = isDeviceOnline,
-                            onOpenCreateDialog = { showCreateQrDialog = true },
-                            onSelectPassDetail = { selectedQrForDetail = it }
-                        )
+                        ResidentFirebaseAuthBarrier(
+                            featureName = "Pases QR y Accesos",
+                            featureDescription = "Exclusivo para residentes registrados con Firebase Auth",
+                            db = db,
+                            onDismissOrBack = { selectedTab = ResidentPortalTab.MI_RESIDENCIA }
+                        ) { resident ->
+                            ResidentQrPassesTabContent(
+                                assignedUnit = resident.unitId.ifBlank { assignedUnit },
+                                condominiumId = condominiumId,
+                                cachedPasses = activeCachedPasses,
+                                visitorHistory = visitorHistory,
+                                isOnline = isDeviceOnline,
+                                onOpenCreateDialog = { showCreateQrDialog = true },
+                                onSelectPassDetail = { selectedQrForDetail = it }
+                            )
+                        }
+                    }
+                    ResidentPortalTab.ACCESO_AUTO -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            ProximityGateControlCard()
+                        }
                     }
                     ResidentPortalTab.RESERVAS -> {
-                        ResidentAmenitiesCalendarTabContent(
-                            condominiumId = condominiumId,
-                            assignedUnit = assignedUnit,
-                            allBookings = allBookings,
-                            isOnline = isDeviceOnline,
-                            onOpenBookingDialog = { showBookAmenityDialog = true },
-                            onGenerateGuestPassForBooking = { booking ->
-                                preselectedBookingForPass = booking
-                                showCreateQrDialog = true
-                            }
-                        )
+                        ResidentFirebaseAuthBarrier(
+                            featureName = "Reserva de Amenidades",
+                            featureDescription = "Exclusivo para residentes registrados con Firebase Auth",
+                            db = db,
+                            onDismissOrBack = { selectedTab = ResidentPortalTab.MI_RESIDENCIA }
+                        ) { resident ->
+                            ResidentAmenitiesCalendarTabContent(
+                                condominiumId = condominiumId,
+                                assignedUnit = resident.unitId.ifBlank { assignedUnit },
+                                allBookings = allBookings,
+                                isOnline = isDeviceOnline,
+                                onOpenBookingDialog = { showBookAmenityDialog = true },
+                                onGenerateGuestPassForBooking = { booking ->
+                                    preselectedBookingForPass = booking
+                                    showCreateQrDialog = true
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -1327,13 +1357,12 @@ private fun CreateTemporalQrPassModal(
                             scope.launch {
                                 val now = System.currentTimeMillis()
                                 val validUntil = now + (selectedDurationHours * 3600 * 1000L)
-                                val randomSuffix = (1000..9999).random()
-                                val passCode = "PASS-${assignedUnit.replace(" ", "")}-$randomSuffix"
+                                val passCode = AlphaCoreEngine.generateUniqueFolio("MED")
 
                                 val noteText = buildString {
                                     append("Pase generado por condómino ($selectedDurationHours horas)")
                                     selectedBookingForLink?.let { b ->
-                                        val folioStr = if (b.folio.isNotBlank()) b.folio else "RSV-$randomSuffix"
+                                        val folioStr = if (b.folio.isNotBlank()) b.folio else "RSV-${(1000..9999).random()}"
                                         append(" | Reserva [Folio: $folioStr - ${b.amenityName}]")
                                     }
                                 }
@@ -1351,7 +1380,7 @@ private fun CreateTemporalQrPassModal(
                                     maxEntries = 1,
                                     currentEntriesCount = 0,
                                     isActive = true,
-                                    integrityHash = "INT-$passCode-${now % 10000}",
+                                    integrityHash = AlphaCoreEngine.computeIntegrityHash(passCode, "N/A", assignedUnit),
                                     note = noteText
                                 )
 

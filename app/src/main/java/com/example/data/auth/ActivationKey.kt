@@ -25,6 +25,10 @@ data class ActivationKey(
     @set:PropertyName("condominiumId")
     var condominiumId: String = "",
 
+    @get:PropertyName("condominiumName")
+    @set:PropertyName("condominiumName")
+    var condominiumName: String = "Los Prados 1",
+
     @get:PropertyName("assignedUnit")
     @set:PropertyName("assignedUnit")
     var assignedUnit: String? = null,
@@ -68,6 +72,7 @@ data class ActivationKey(
             "keyId" to keyId,
             "role" to role,
             "condominiumId" to condominiumId,
+            "condominiumName" to condominiumName,
             "assignedUnit" to assignedUnit,
             "isActive" to isActive,
             "expirationTimestampMillis" to expirationTimestampMillis,
@@ -86,6 +91,7 @@ data class ActivationKey(
                 val direct = snapshot.toObject(ActivationKey::class.java)
                 if (direct != null) {
                     if (direct.keyId.isBlank()) direct.keyId = snapshot.id
+                    if (direct.condominiumName.isBlank()) direct.condominiumName = "Los Prados 1"
                     direct
                 } else {
                     fallbackMapping(snapshot)
@@ -100,6 +106,7 @@ data class ActivationKey(
                 keyId = snapshot.getString("keyId") ?: snapshot.id,
                 role = snapshot.getString("role") ?: "",
                 condominiumId = snapshot.getString("condominiumId") ?: "",
+                condominiumName = snapshot.getString("condominiumName") ?: "Los Prados 1",
                 assignedUnit = snapshot.getString("assignedUnit"),
                 isActive = snapshot.getBoolean("isActive") ?: (snapshot.get("isActive") == true),
                 expirationTimestampMillis = snapshot.getLong("expirationTimestampMillis"),

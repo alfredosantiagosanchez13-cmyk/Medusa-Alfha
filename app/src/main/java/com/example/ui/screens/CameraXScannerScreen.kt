@@ -130,6 +130,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.example.data.auth.UserSession
+import com.example.data.audit.SecurityAuditDao
 import com.example.data.booking.AppDatabase
 import com.example.data.audit.AuditLogEntity
 import com.example.data.core.AlphaCoreEngine
@@ -167,6 +169,17 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+
+/**
+ * Excepción defensiva disparada cuando un código QR pertenece a otro desarrollo habitacional.
+ */
+class TenantMismatchException(
+    val passCondominium: String,
+    val activeCondominium: String,
+    val passCode: String
+) : SecurityException(
+    "VIOLACIÓN DE AISLAMIENTO MULTI-TENANT: El pase '$passCode' emitido para '$passCondominium' no corresponde al condominio activo '$activeCondominium'."
+)
 
 /**
  * Pantalla completa de previsualización CameraX con retícula táctica de escaneo
@@ -228,6 +241,7 @@ fun CameraXScannerScreen(
 
     // Estado de verificación y procesamiento
     var activeVerificationResult by remember { mutableStateOf<VerificationResult?>(null) }
+    var activeTenantMismatchException by remember { mutableStateOf<TenantMismatchException?>(null) }
     var lastScannedCode by remember { mutableStateOf<String?>(null) }
     var isGateOpeningAnimation by remember { mutableStateOf(false) }
     var gateAnimationProgress by remember { mutableStateOf(0f) }
@@ -362,6 +376,41 @@ fun CameraXScannerScreen(
             )
 
             lastScannedCode = cleanCode
+
+            // Validación defensiva estricta de aislamiento de Inquilino / Condominio (Cross-Validation)
+            val passCondo = result.condominiumId?.trim()
+            val activeCondoId = activeCondo.name.trim()
+
+            val isCondoMismatch = (result.status == PassStatus.INVALID && result.failureReason?.contains("aislamiento", ignoreCase = true) == true) ||
+                (!passCondo.isNullOrBlank() && !passCondo.equals(activeCondoId, ignoreCase = true) && !passCondo.contains(activeCondoId, ignoreCase = true) && !activeCondoId.contains(passCondo, ignoreCase = true))
+
+            if (isCondoMismatch) {
+                val detectedCondo = passCondo ?: "OTRO_CONDOMINIO"
+                val mismatchException = TenantMismatchException(
+                    passCondominium = detectedCondo,
+                    activeCondominium = activeCondoId,
+                    passCode = cleanCode
+                )
+                // Registrar inmediatamente intento de intrusión/violación de inquilino en SecurityAuditDao con SEVERITY_CRITICAL
+                val criticalAudit = AuditLogEntity(
+                    logId = AlphaCoreEngine.generateUniqueFolio("SEC"),
+                    timestamp = System.currentTimeMillis(),
+                    operatorId = "Guardia Garita ${activeCondo.shortTag}",
+                    eventDescription = "INTENTO DE INTRUSIÓN MULTI-TENANT: Pase emitido para '$detectedCondo', rechazado en caseta activa '$activeCondoId'. Error: ${mismatchException.message}",
+                    severity = AuditLogEntity.Severity.SECURITY_CRITICAL,
+                    forensicPayload = """{"actionType":"SECURITY_INTRUSION_ATTEMPT","location":"Garita ${activeCondo.displayName}","targetEntity":"${result.qrPass?.guestName ?: "Desconocido"} [Pase: $cleanCode]","passCondominium":"$detectedCondo","activeCondominium":"$activeCondoId"}"""
+                )
+                try {
+                    db.securityAuditDao().insertLog(criticalAudit)
+                } catch (e: Exception) {
+                    // Fallback con inserción estándar
+                    db.auditLogDao().insertAuditLog(criticalAudit)
+                }
+
+                // Notificar en UI mostrando diálogo crítico defensivo de bloqueo
+                activeTenantMismatchException = mismatchException
+                return@launch
+            }
 
             // Determinar si es un residente válido con modo touchless activo
             val isResidentPass = result.status == PassStatus.VALID && (
@@ -1322,6 +1371,87 @@ fun CameraXScannerScreen(
                 }
             )
         }
+
+        // 8. DIÁLOGO CRÍTICO DEFENSIVO DE VIOLACIÓN DE TENANT / CONDOMINIO
+        activeTenantMismatchException?.let { mismatch ->
+            AlertDialog(
+                onDismissRequest = { activeTenantMismatchException = null },
+                containerColor = NavyDark,
+                shape = RoundedCornerShape(16.dp),
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Security, contentDescription = null, tint = ErrorRed)
+                        Text(
+                            text = "ALERTA: INTENTO DE INTRUSIÓN",
+                            color = ErrorRed,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            color = ErrorRed.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, ErrorRed.copy(alpha = 0.6f))
+                        ) {
+                            Text(
+                                text = "El pase escaneado no pertenece a este fraccionamiento. La operación ha sido bloqueada y registrada con severidad SECURITY_CRITICAL en la bitácora forense inmutable.",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = NavyCard),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "Código de Pase: ${mismatch.passCode}",
+                                    color = GoldPrimary,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Condominio Emisor: ${mismatch.passCondominium}",
+                                    color = WarningOrange,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = "Caseta Activa: ${mismatch.activeCondominium} (${activeCondo.displayName})",
+                                    color = CyanNeon,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { activeTenantMismatchException = null },
+                        colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = Color.White),
+                        modifier = Modifier.testTag("btn_dismiss_tenant_mismatch")
+                    ) {
+                        Text("Entendido / Bloquear Acceso", fontWeight = FontWeight.Bold)
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -1358,7 +1488,7 @@ fun TacticalScannerOverlay(
 
         val cornerLength = 36.dp.value * 2.5f
         val cornerStroke = if (isSuccess) 5.dp.value * 2.5f else 3.5.dp.value * 2.5f
-        val cornerColor = if (isSuccess) SuccessGreen else GoldPrimary
+        val cornerColor = if (isSuccess) SuccessGreen else Color(0xFFD4AF37)
 
         // DIBUJAR MÁSCARA Y LÁSER EN CANVAS
         Canvas(modifier = Modifier.fillMaxSize()) {

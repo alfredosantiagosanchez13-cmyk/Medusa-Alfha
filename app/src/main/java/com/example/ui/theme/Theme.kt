@@ -20,6 +20,8 @@ val AlertRed = Color(0xFFEF4444)
 val WarningOrange = Color(0xFFF97316)
 val TextWhite = Color(0xFFF8FAFC)
 val TextMuted = Color(0xFF94A3B8)
+val GrayMuted = Color(0xFF94A3B8)
+val NavyBorder = Color(0xFF334155)
 
 private val DarkColorScheme = darkColorScheme(
     primary = GoldPrimary,
