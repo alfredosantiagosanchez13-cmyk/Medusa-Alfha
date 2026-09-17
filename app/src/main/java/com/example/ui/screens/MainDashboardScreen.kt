@@ -141,13 +141,8 @@ fun MainDashboardScreen(
     var showCreateEventModal by remember { mutableStateOf(false) }
     var selectedEventDetail by remember { mutableStateOf<CommonAreaBooking?>(null) }
     var selectedVisitorDetail by remember { mutableStateOf<VisitorCheckIn?>(null) }
-
-    // Auto-seed inicial inteligente si la base de datos de eventos está vacía
-    LaunchedEffect(Unit) {
-        if (commonAreaDao.getBookingsCount() == 0) {
-            seedSampleCommonAreaEvents(commonAreaDao)
-        }
-    }
+    var showPlanoModal by remember { mutableStateOf(false) }
+    var showReglamentoModal by remember { mutableStateOf(false) }
 
     // Filtrado de eventos próximos
     val upcomingEvents = remember(allEvents, searchQuery) {

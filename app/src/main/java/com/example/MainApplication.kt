@@ -19,8 +19,14 @@ import com.example.utils.ResidentNotificationManager
  */
 open class MainApplication : Application() {
 
-    lateinit var firebaseAuthProvider: FirebaseAuthProvider
-        protected set
+    private var _firebaseAuthProvider: FirebaseAuthProvider? = null
+
+    val firebaseAuthProvider: FirebaseAuthProvider
+        get() = _firebaseAuthProvider ?: synchronized(this) {
+            _firebaseAuthProvider ?: FirebaseAuthProvider.initialize(this).also {
+                _firebaseAuthProvider = it
+            }
+        }
 
     companion object {
         private const val TAG = "MainApplication"
@@ -38,6 +44,14 @@ open class MainApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+
+        // Safe global uncaught exception handler to prevent hard crashes and log issues clearly
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Log.e(TAG, "FATAL UNCAUGHT EXCEPTION in thread ${thread.name}: ${throwable.message}", throwable)
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+
         Log.i(TAG, "Initializing MainApplication startup sequence...")
 
         // 1. Canales de notificación
@@ -88,7 +102,7 @@ open class MainApplication : Application() {
 
     protected open fun initializeFirebaseAuthProvider() {
         try {
-            firebaseAuthProvider = FirebaseAuthProvider.initialize(this)
+            _firebaseAuthProvider = FirebaseAuthProvider.initialize(this)
             Log.i(TAG, "FirebaseAuthProvider successfully initialized in MainApplication.")
         } catch (e: Exception) {
             Log.e(TAG, "Warning: Failed to initialize FirebaseAuthProvider: ${e.message}", e)
