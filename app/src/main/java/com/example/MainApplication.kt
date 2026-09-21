@@ -49,7 +49,11 @@ open class MainApplication : Application() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             Log.e(TAG, "FATAL UNCAUGHT EXCEPTION in thread ${thread.name}: ${throwable.message}", throwable)
-            defaultHandler?.uncaughtException(thread, throwable)
+            if (android.os.Looper.getMainLooper().thread == thread) {
+                defaultHandler?.uncaughtException(thread, throwable)
+            } else {
+                Log.w(TAG, "Aviso: Excepción interceptada en hilo secundario (${thread.name}) para salvaguardar la ejecución: ${throwable.message}")
+            }
         }
 
         Log.i(TAG, "Initializing MainApplication startup sequence...")
@@ -73,8 +77,8 @@ open class MainApplication : Application() {
             ResidentNotificationManager.createNotificationChannel(this)
             AmenityReminderManager.createNotificationChannel(this)
             Log.i(TAG, "Notification channels successfully created.")
-        } catch (e: Exception) {
-            Log.e(TAG, "Warning: Failed to create notification channels: ${e.message}", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Warning: Failed to create notification channels: ${t.message}", t)
         }
     }
 
@@ -83,9 +87,9 @@ open class MainApplication : Application() {
             val db = AppDatabase.getDatabase(this)
             isDatabaseAvailable = db.isOpen || true
             Log.i(TAG, "Room Database successfully pre-initialized.")
-        } catch (e: Exception) {
+        } catch (t: Throwable) {
             isDatabaseAvailable = false
-            Log.e(TAG, "Warning: Failed to pre-initialize Room Database on application startup: ${e.message}", e)
+            Log.e(TAG, "Warning: Failed to pre-initialize Room Database on application startup: ${t.message}", t)
         }
     }
 
@@ -94,9 +98,9 @@ open class MainApplication : Application() {
             val initialized = FirebaseConfigHelper.initialize(this)
             isFirebaseAvailable = initialized
             Log.i(TAG, "Firebase initialized safely via FirebaseConfigHelper: isAvailable=$isFirebaseAvailable")
-        } catch (e: Exception) {
+        } catch (t: Throwable) {
             isFirebaseAvailable = false
-            Log.w(TAG, "Firebase initialization skipped or credentials missing: ${e.message}")
+            Log.w(TAG, "Firebase initialization skipped or credentials missing: ${t.message}")
         }
     }
 
@@ -104,8 +108,8 @@ open class MainApplication : Application() {
         try {
             _firebaseAuthProvider = FirebaseAuthProvider.initialize(this)
             Log.i(TAG, "FirebaseAuthProvider successfully initialized in MainApplication.")
-        } catch (e: Exception) {
-            Log.e(TAG, "Warning: Failed to initialize FirebaseAuthProvider: ${e.message}", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Warning: Failed to initialize FirebaseAuthProvider: ${t.message}", t)
         }
     }
 }

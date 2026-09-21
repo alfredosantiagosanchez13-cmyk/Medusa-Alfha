@@ -11,13 +11,18 @@ import androidx.security.crypto.MasterKey
  * Utiliza EncryptedSharedPreferences respaldado por Android Keystore (AES-256 GCM)
  * con mecanismo de recuperación defensivo para garantizar persistencia y seguridad.
  */
-class MedusaSessionPreferences(context: Context) {
+class MedusaSessionPreferences private constructor(context: Context) {
 
-    private val prefs: SharedPreferences = createSecurePreferences(context.applicationContext)
+    private val appContext = context.applicationContext
+
+    // Referencia dinámica para permitir fallback automático sin crash si falla el cifrado
+    @Volatile
+    private var prefs: SharedPreferences = createSecurePreferences(appContext)
 
     companion object {
         private const val TAG = "MedusaSessionPrefs"
         private const val PREFS_NAME = "medusa_alfha_secure_session"
+        private const val FALLBACK_PREFS_NAME = "medusa_alfha_secure_session_fallback"
 
         private const val KEY_KEY_ID = "pref_key_id"
         private const val KEY_ROLE = "pref_role"
@@ -33,7 +38,7 @@ class MedusaSessionPreferences(context: Context) {
 
         fun getInstance(context: Context): MedusaSessionPreferences {
             return instance ?: synchronized(this) {
-                instance ?: MedusaSessionPreferences(context).also { instance = it }
+                instance ?: MedusaSessionPreferences(context.applicationContext).also { instance = it }
             }
         }
 
@@ -43,21 +48,46 @@ class MedusaSessionPreferences(context: Context) {
                     .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                     .build()
 
-                EncryptedSharedPreferences.create(
+                val securePrefs = EncryptedSharedPreferences.create(
                     context,
                     PREFS_NAME,
                     masterKey,
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                 )
-            } catch (e: Exception) {
+
+                // Validación activa: comprobación de lectura para detectar discrepancias de Keystore
+                securePrefs.all
+                securePrefs
+            } catch (t: Throwable) {
                 Log.w(
                     TAG,
-                    "No se pudo inicializar EncryptedSharedPreferences (Keystore no disponible o entorno de pruebas). " +
-                        "Activando almacenamiento seguro privado como contingencia: ${e.message}"
+                    "Aviso: Keystore o EncryptedSharedPreferences no disponible / corrupto: ${t.message}. Recreando almacenamiento de contingencia...",
+                    t
                 )
-                context.getSharedPreferences("${PREFS_NAME}_fallback", Context.MODE_PRIVATE)
+                try {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                        context.deleteSharedPreferences(PREFS_NAME)
+                    } else {
+                        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().commit()
+                    }
+                } catch (delEx: Throwable) {
+                    Log.w(TAG, "No se pudo purgar archivo de preferencias corrupto: ${delEx.message}")
+                }
+                context.getSharedPreferences(FALLBACK_PREFS_NAME, Context.MODE_PRIVATE)
             }
+        }
+    }
+
+    private fun getSafePrefs(): SharedPreferences {
+        return try {
+            prefs.all
+            prefs
+        } catch (t: Throwable) {
+            Log.w(TAG, "Excepción accediendo a preferencias encriptadas: ${t.message}. Alternando a fallback seguro.")
+            val fallback = appContext.getSharedPreferences(FALLBACK_PREFS_NAME, Context.MODE_PRIVATE)
+            prefs = fallback
+            fallback
         }
     }
 
@@ -65,71 +95,84 @@ class MedusaSessionPreferences(context: Context) {
      * Guarda de forma segura los identificadores de la sesión activa tras una validación exitosa.
      */
     fun saveSession(activationKey: ActivationKey, role: MedusaRole) {
-        val blockFinancial = (role == MedusaRole.GUARDIA_CASETA)
-        val timestamp = System.currentTimeMillis()
-        val condoName = activationKey.condominiumName.ifBlank { "Los Prados 1" }
+        try {
+            val blockFinancial = (role == MedusaRole.GUARDIA_CASETA)
+            val timestamp = System.currentTimeMillis()
+            val condoName = activationKey.condominiumName.ifBlank { "Los Prados 1" }
 
-        prefs.edit()
-            .putString(KEY_KEY_ID, activationKey.keyId)
-            .putString(KEY_ROLE, role.name)
-            .putString(KEY_CONDOMINIUM_ID, activationKey.condominiumId)
-            .putString(KEY_CONDOMINIUM_NAME, condoName)
-            .putString(KEY_ASSIGNED_UNIT, activationKey.assignedUnit ?: "")
-            .putBoolean(KEY_IS_ACTIVE, true)
-            .putBoolean(KEY_FINANCIAL_BLOCKED, blockFinancial)
-            .putLong(KEY_ACTIVATION_TIMESTAMP, timestamp)
-            .apply()
+            getSafePrefs().edit()
+                .putString(KEY_KEY_ID, activationKey.keyId)
+                .putString(KEY_ROLE, role.name)
+                .putString(KEY_CONDOMINIUM_ID, activationKey.condominiumId)
+                .putString(KEY_CONDOMINIUM_NAME, condoName)
+                .putString(KEY_ASSIGNED_UNIT, activationKey.assignedUnit ?: "")
+                .putBoolean(KEY_IS_ACTIVE, true)
+                .putBoolean(KEY_FINANCIAL_BLOCKED, blockFinancial)
+                .putLong(KEY_ACTIVATION_TIMESTAMP, timestamp)
+                .apply()
 
-        // Sincroniza el guardia de acceso nativo
-        MedusaFinancialAccessGuard.applyRoleSecurityPolicy(role)
-        Log.i(TAG, "✅ Sesión guardada de forma segura para rol: ${role.name}, condominio: $condoName (${activationKey.condominiumId})")
+            MedusaFinancialAccessGuard.applyRoleSecurityPolicy(role)
+            Log.i(TAG, "✅ Sesión guardada de forma segura para rol: ${role.name}, condominio: $condoName (${activationKey.condominiumId})")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error persistiendo sesión de activación: ${t.message}", t)
+        }
     }
 
     /**
      * Sobrecarga para persistir directamente una instancia tipada de [UserSession].
      */
     fun saveSession(session: UserSession) {
-        prefs.edit()
-            .putString(KEY_KEY_ID, session.activationKey)
-            .putString(KEY_ROLE, session.currentRole.name)
-            .putString(KEY_CONDOMINIUM_ID, session.condominiumId)
-            .putString(KEY_CONDOMINIUM_NAME, session.condominiumName)
-            .putString(KEY_ASSIGNED_UNIT, session.assignedUnitId)
-            .putBoolean(KEY_IS_ACTIVE, session.isActive)
-            .putBoolean(KEY_FINANCIAL_BLOCKED, session.isFinancialBlocked)
-            .putLong(KEY_ACTIVATION_TIMESTAMP, session.timestampMillis)
-            .apply()
+        try {
+            getSafePrefs().edit()
+                .putString(KEY_KEY_ID, session.activationKey)
+                .putString(KEY_ROLE, session.currentRole.name)
+                .putString(KEY_CONDOMINIUM_ID, session.condominiumId)
+                .putString(KEY_CONDOMINIUM_NAME, session.condominiumName)
+                .putString(KEY_ASSIGNED_UNIT, session.assignedUnitId)
+                .putBoolean(KEY_IS_ACTIVE, session.isActive)
+                .putBoolean(KEY_FINANCIAL_BLOCKED, session.isFinancialBlocked)
+                .putLong(KEY_ACTIVATION_TIMESTAMP, session.timestampMillis)
+                .apply()
 
-        MedusaFinancialAccessGuard.applyRoleSecurityPolicy(session.currentRole)
-        Log.i(TAG, "✅ UserSession persistida exitosamente para unidad: ${session.assignedUnitId} en ${session.condominiumName}")
+            MedusaFinancialAccessGuard.applyRoleSecurityPolicy(session.currentRole)
+            Log.i(TAG, "✅ UserSession persistida exitosamente para unidad: ${session.assignedUnitId} en ${session.condominiumName}")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error persistiendo UserSession: ${t.message}", t)
+        }
     }
 
     /**
      * Recupera los datos de la sesión activa si existe.
      */
     fun getSessionData(): UserSession? {
-        val keyId = prefs.getString(KEY_KEY_ID, null) ?: return null
-        val isActive = prefs.getBoolean(KEY_IS_ACTIVE, false)
-        if (!isActive) return null
+        return try {
+            val safe = getSafePrefs()
+            val keyId = safe.getString(KEY_KEY_ID, null) ?: return null
+            val isActive = safe.getBoolean(KEY_IS_ACTIVE, false)
+            if (!isActive) return null
 
-        val roleStr = prefs.getString(KEY_ROLE, MedusaRole.UNASSIGNED.name)
-        val role = MedusaRole.fromString(roleStr)
-        val condoId = prefs.getString(KEY_CONDOMINIUM_ID, "") ?: ""
-        val condoName = prefs.getString(KEY_CONDOMINIUM_NAME, "Los Prados 1") ?: "Los Prados 1"
-        val unit = prefs.getString(KEY_ASSIGNED_UNIT, "") ?: ""
-        val financialBlocked = prefs.getBoolean(KEY_FINANCIAL_BLOCKED, role == MedusaRole.GUARDIA_CASETA)
-        val timestamp = prefs.getLong(KEY_ACTIVATION_TIMESTAMP, 0L)
+            val roleStr = safe.getString(KEY_ROLE, MedusaRole.UNASSIGNED.name)
+            val role = MedusaRole.fromString(roleStr)
+            val condoId = safe.getString(KEY_CONDOMINIUM_ID, "") ?: ""
+            val condoName = safe.getString(KEY_CONDOMINIUM_NAME, "Los Prados 1") ?: "Los Prados 1"
+            val unit = safe.getString(KEY_ASSIGNED_UNIT, "") ?: ""
+            val financialBlocked = safe.getBoolean(KEY_FINANCIAL_BLOCKED, role == MedusaRole.GUARDIA_CASETA)
+            val timestamp = safe.getLong(KEY_ACTIVATION_TIMESTAMP, 0L)
 
-        return UserSession(
-            activationKey = keyId,
-            currentRole = role,
-            condominiumId = condoId,
-            assignedUnitId = unit,
-            condominiumName = condoName,
-            isActive = true,
-            isFinancialBlocked = financialBlocked,
-            timestampMillis = timestamp
-        )
+            UserSession(
+                activationKey = keyId,
+                currentRole = role,
+                condominiumId = condoId,
+                assignedUnitId = unit,
+                condominiumName = condoName,
+                isActive = true,
+                isFinancialBlocked = financialBlocked,
+                timestampMillis = timestamp
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "Error leyendo datos de sesión (recuperación segura): ${t.message}")
+            null
+        }
     }
 
     /**
@@ -138,25 +181,56 @@ class MedusaSessionPreferences(context: Context) {
     fun getUserSession(): UserSession? = getSessionData()
 
     fun hasActiveSession(): Boolean {
-        return prefs.getBoolean(KEY_IS_ACTIVE, false) && !prefs.getString(KEY_KEY_ID, null).isNullOrBlank()
+        return try {
+            val safe = getSafePrefs()
+            safe.getBoolean(KEY_IS_ACTIVE, false) && !safe.getString(KEY_KEY_ID, null).isNullOrBlank()
+        } catch (t: Throwable) {
+            Log.w(TAG, "Error verificando sesión activa: ${t.message}")
+            false
+        }
     }
 
-    fun getCondominiumId(): String = prefs.getString(KEY_CONDOMINIUM_ID, "") ?: ""
+    fun getCondominiumId(): String {
+        return try {
+            getSafePrefs().getString(KEY_CONDOMINIUM_ID, "") ?: ""
+        } catch (t: Throwable) {
+            ""
+        }
+    }
 
-    fun getAssignedUnit(): String? = prefs.getString(KEY_ASSIGNED_UNIT, null)
+    fun getAssignedUnit(): String? {
+        return try {
+            getSafePrefs().getString(KEY_ASSIGNED_UNIT, null)
+        } catch (t: Throwable) {
+            null
+        }
+    }
 
     fun getCurrentRole(): MedusaRole {
-        val roleStr = prefs.getString(KEY_ROLE, null)
-        return MedusaRole.fromString(roleStr)
+        return try {
+            val roleStr = getSafePrefs().getString(KEY_ROLE, null)
+            MedusaRole.fromString(roleStr)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Error obteniendo rol actual: ${t.message}")
+            MedusaRole.UNASSIGNED
+        }
     }
 
     fun isFinancialAccessBlocked(): Boolean {
-        return prefs.getBoolean(KEY_FINANCIAL_BLOCKED, true)
+        return try {
+            getSafePrefs().getBoolean(KEY_FINANCIAL_BLOCKED, true)
+        } catch (t: Throwable) {
+            true
+        }
     }
 
     fun clearSession() {
-        prefs.edit().clear().apply()
-        MedusaFinancialAccessGuard.applyRoleSecurityPolicy(MedusaRole.UNASSIGNED)
-        Log.i(TAG, "🗑️ Sesión y credenciales de activación purgadas de las preferencias.")
+        try {
+            getSafePrefs().edit().clear().apply()
+            MedusaFinancialAccessGuard.applyRoleSecurityPolicy(MedusaRole.UNASSIGNED)
+            Log.i(TAG, "🗑️ Sesión y credenciales de activación purgadas de las preferencias.")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error purgando sesión: ${t.message}", t)
+        }
     }
 }

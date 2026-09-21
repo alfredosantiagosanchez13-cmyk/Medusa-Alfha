@@ -229,6 +229,13 @@ fun AnalyticsSummaryScreen(
             }
         }
 
+        // TABLERO RESUMEN REACTIVO DE BITÁCORA E INCIDENCIAS DESDE ROOM SQLITE
+        item {
+            com.example.ui.components.RoomSecuritySummaryDashboardComponent(
+                condominiumName = "Los Prados Residencial"
+            )
+        }
+
         // Executive KPI Metrics Row
         item {
             Row(

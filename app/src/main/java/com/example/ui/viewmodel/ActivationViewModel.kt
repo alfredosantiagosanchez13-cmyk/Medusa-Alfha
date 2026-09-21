@@ -11,6 +11,7 @@ import com.example.data.auth.MedusaFinancialAccessGuard
 import com.example.data.auth.MedusaRole
 import com.example.data.auth.MedusaSessionPreferences
 import com.example.data.auth.UserSession
+import com.example.data.firebase.FirebaseConfigHelper
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.Dispatchers
@@ -75,7 +76,7 @@ sealed interface ActivationUiState {
  */
 class ActivationViewModel(
     application: Application,
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
+    private val firestore: FirebaseFirestore? = FirebaseConfigHelper.getFirestore(),
     private val sessionPreferences: MedusaSessionPreferences = MedusaSessionPreferences.getInstance(application)
 ) : AndroidViewModel(application) {
 
@@ -85,11 +86,21 @@ class ActivationViewModel(
     private val _currentSession = MutableStateFlow<UserSession?>(null)
     val currentSession: StateFlow<UserSession?> = _currentSession.asStateFlow()
 
-    private val _currentRole = MutableStateFlow<MedusaRole>(sessionPreferences.getCurrentRole())
+    private val _currentRole = MutableStateFlow<MedusaRole>(
+        try {
+            sessionPreferences.getCurrentRole()
+        } catch (t: Throwable) {
+            MedusaRole.UNASSIGNED
+        }
+    )
     val currentRole: StateFlow<MedusaRole> = _currentRole.asStateFlow()
 
     init {
-        checkExistingSession()
+        try {
+            checkExistingSession()
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error initializing session check: ${t.message}", t)
+        }
     }
 
     /**
@@ -97,25 +108,29 @@ class ActivationViewModel(
      * Permite que la aplicación recuerde el perfil en los siguientes inicios de sesión.
      */
     fun checkExistingSession() {
-        val existingSession = sessionPreferences.getSessionData()
-        if (existingSession != null && existingSession.isActive) {
-            _currentSession.value = existingSession
-            _currentRole.value = existingSession.role
-            // Restablece la política de seguridad nativa para el rol recordado
-            MedusaFinancialAccessGuard.applyRoleSecurityPolicy(existingSession.role)
-            _uiState.value = ActivationUiState.Success(
-                activationKey = ActivationKey(
-                    keyId = existingSession.keyId,
-                    role = existingSession.role.name,
-                    condominiumId = existingSession.condominiumId,
-                    assignedUnit = existingSession.assignedUnit,
-                    isActive = true
-                ),
-                role = existingSession.role,
-                message = "Sesión activa restaurada: ${existingSession.role.displayName}",
-                isFinancialBlocked = existingSession.isFinancialBlocked
-            )
-            Log.i(TAG, "🔄 Sesión previa restaurada con éxito para condominio: ${existingSession.condominiumId}")
+        try {
+            val existingSession = sessionPreferences.getSessionData()
+            if (existingSession != null && existingSession.isActive) {
+                _currentSession.value = existingSession
+                _currentRole.value = existingSession.role
+                // Restablece la política de seguridad nativa para el rol recordado
+                MedusaFinancialAccessGuard.applyRoleSecurityPolicy(existingSession.role)
+                _uiState.value = ActivationUiState.Success(
+                    activationKey = ActivationKey(
+                        keyId = existingSession.keyId,
+                        role = existingSession.role.name,
+                        condominiumId = existingSession.condominiumId,
+                        assignedUnit = existingSession.assignedUnit,
+                        isActive = true
+                    ),
+                    role = existingSession.role,
+                    message = "Sesión activa restaurada: ${existingSession.role.displayName}",
+                    isFinancialBlocked = existingSession.isFinancialBlocked
+                )
+                Log.i(TAG, "🔄 Sesión previa restaurada con éxito para condominio: ${existingSession.condominiumId}")
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "Error verificando sesión existente: ${t.message}", t)
         }
     }
 
@@ -138,6 +153,14 @@ class ActivationViewModel(
 
         viewModelScope.launch {
             try {
+                if (firestore == null) {
+                    _uiState.value = ActivationUiState.Error(
+                        errorMessage = "Servicio en la nube no disponible o sin credenciales (modo local autónomo activo).",
+                        errorType = ActivationErrorType.NETWORK_ERROR
+                    )
+                    return@launch
+                }
+
                 // 1. Consulta segura a la ruta /activation_keys/$inputKey
                 val snapshot = withContext(Dispatchers.IO) {
                     firestore.collection(COLLECTION_ACTIVATION_KEYS)
@@ -347,7 +370,7 @@ class ActivationViewModel(
          */
         fun provideFactory(
             application: Application,
-            firestore: FirebaseFirestore = FirebaseFirestore.getInstance(),
+            firestore: FirebaseFirestore? = FirebaseConfigHelper.getFirestore(),
             sessionPreferences: MedusaSessionPreferences = MedusaSessionPreferences.getInstance(application)
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")

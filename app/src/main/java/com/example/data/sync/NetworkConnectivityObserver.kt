@@ -34,8 +34,11 @@ data class NetworkStateInfo(
  */
 class NetworkConnectivityObserver private constructor(private val context: Context) {
 
-    private val connectivityManager =
-        context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private val connectivityManager: ConnectivityManager? = try {
+        context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    } catch (e: Exception) {
+        null
+    }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -50,8 +53,9 @@ class NetworkConnectivityObserver private constructor(private val context: Conte
 
     private fun computeInitialState(): NetworkStateInfo {
         return try {
-            val activeNetwork = connectivityManager.activeNetwork
-            val caps = connectivityManager.getNetworkCapabilities(activeNetwork)
+            val conn = connectivityManager
+            val activeNetwork = conn?.activeNetwork
+            val caps = if (activeNetwork != null) conn.getNetworkCapabilities(activeNetwork) else null
             if (activeNetwork == null || caps == null) {
                 NetworkStateInfo(
                     status = ConnectivityStatus.OFFLINE,
@@ -113,7 +117,8 @@ class NetworkConnectivityObserver private constructor(private val context: Conte
         }
 
         try {
-            connectivityManager.registerNetworkCallback(request, networkCallback!!)
+            val callback = networkCallback ?: return
+            connectivityManager?.registerNetworkCallback(request, callback)
         } catch (e: Exception) {
             // Fallback si permisos no disponibles
         }

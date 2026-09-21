@@ -87,8 +87,15 @@ import com.example.data.booking.AmenityBooking
 import com.example.data.booking.AppDatabase
 import com.example.data.booking.CommonAreaBooking
 import com.example.data.core.AlphaCoreEngine
+import com.example.data.incident.IncidentCategory
+import com.example.data.incident.IncidentEntity
+import com.example.data.incident.IncidentPriority
 import com.example.data.passes.QrPassRoomEntity
+import com.example.data.prados.PradosResidencialDataProvider
+import com.example.data.vecinos.LosPradosCroquisData
+import com.example.data.vecinos.LoteCroquis
 import com.example.data.visitor.VisitorCheckIn
+import com.example.ui.components.*
 import com.example.ui.theme.CyanNeon
 import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.GoldPrimary
@@ -107,8 +114,10 @@ import java.util.Locale
  */
 enum class DashboardFilterCategory(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     ALL("Resumen General", Icons.Default.FilterList),
-    COMMON_AREAS("Áreas Comunes", Icons.Default.Apartment),
-    QR_VISITORS("Visitantes QR", Icons.Default.QrCodeScanner)
+    INCIDENTS("Incidencias", Icons.Default.Warning),
+    QR_PASSES("Pases QR", Icons.Default.QrCode),
+    QR_VISITORS("Ingresos Caseta", Icons.Default.QrCodeScanner),
+    COMMON_AREAS("Áreas Comunes", Icons.Default.Apartment)
 }
 
 /**
@@ -130,25 +139,87 @@ fun MainDashboardScreen(
     val commonAreaDao = remember { db.commonAreaBookingDao() }
     val visitorCheckInDao = remember { db.visitorCheckInDao() }
     val qrPassDao = remember { db.qrPassDao() }
+    val incidentDao = remember { db.incidentDao() }
+
+    // Sembrado reactivo garantizado de datos reales de Prados Residencial
+    LaunchedEffect(Unit) {
+        PradosResidencialDataProvider.seedPradosInitialDataIfEmpty(db)
+    }
 
     // Flujos reactivos de Room DB
     val allEvents by commonAreaDao.getAllBookings().collectAsState(initial = emptyList())
     val allCheckIns by visitorCheckInDao.getAllCheckIns().collectAsState(initial = emptyList())
     val allQrPasses by qrPassDao.getAllPassesFlow().collectAsState(initial = emptyList())
+    val allIncidents by incidentDao.getAllIncidentsFlow().collectAsState(initial = emptyList())
 
     var selectedFilter by remember { mutableStateOf(DashboardFilterCategory.ALL) }
+    var incidentSubFilter by remember { mutableStateOf("ALL") } // "ALL", "ACTIVE", "RESOLVED", "CRITICAL"
+    var selectedPradosHouse by remember { mutableStateOf<LoteCroquis?>(null) }
     var searchQuery by remember { mutableStateOf("") }
+
+    // Control de modales y diálogos interactivos
+    var showHousePickerModal by remember { mutableStateOf(false) }
+    var showReportIncidentModal by remember { mutableStateOf(false) }
+    var selectedIncidentDetail by remember { mutableStateOf<IncidentEntity?>(null) }
+    var incidentToResolve by remember { mutableStateOf<IncidentEntity?>(null) }
+    var showCreateQrPassModal by remember { mutableStateOf(false) }
+    var selectedQrPassForViewer by remember { mutableStateOf<QrPassRoomEntity?>(null) }
     var showCreateEventModal by remember { mutableStateOf(false) }
     var selectedEventDetail by remember { mutableStateOf<CommonAreaBooking?>(null) }
     var selectedVisitorDetail by remember { mutableStateOf<VisitorCheckIn?>(null) }
-    var showPlanoModal by remember { mutableStateOf(false) }
-    var showReglamentoModal by remember { mutableStateOf(false) }
+    var showCameraScannerModal by remember { mutableStateOf(false) }
 
-    // Filtrado de eventos próximos
-    val upcomingEvents = remember(allEvents, searchQuery) {
-        val now = System.currentTimeMillis() - (4 * 3600 * 1000L) // Incluye eventos en curso hoy
+    // 1. Filtrado reactivo de incidencias vinculadas a Prados Residencial
+    val filteredIncidents = remember(allIncidents, searchQuery, selectedPradosHouse, incidentSubFilter) {
+        allIncidents.filter { inc ->
+            if (selectedPradosHouse == null) true else {
+                inc.location.contains(selectedPradosHouse?.labelCasa ?: "", ignoreCase = true)
+            }
+        }.filter { inc ->
+            when (incidentSubFilter) {
+                "ACTIVE" -> inc.status != "RESUELTO" && inc.status != "CERRADO"
+                "RESOLVED" -> inc.status == "RESUELTO" || inc.status == "CERRADO"
+                "CRITICAL" -> inc.priority == IncidentPriority.CRITICA
+                else -> true
+            }
+        }.filter { inc ->
+            if (searchQuery.isBlank()) true else {
+                inc.folio.contains(searchQuery, ignoreCase = true) ||
+                inc.location.contains(searchQuery, ignoreCase = true) ||
+                inc.aiSummary.contains(searchQuery, ignoreCase = true) ||
+                inc.rawTranscript.contains(searchQuery, ignoreCase = true) ||
+                inc.category.displayName.contains(searchQuery, ignoreCase = true) ||
+                inc.reportedBy.contains(searchQuery, ignoreCase = true)
+            }
+        }.sortedByDescending { it.timestampMillis }
+    }
+
+    // 2. Filtrado reactivo de pases QR vinculados a casas de Prados Residencial
+    val filteredQrPasses = remember(allQrPasses, searchQuery, selectedPradosHouse) {
+        allQrPasses.filter { pass ->
+            if (selectedPradosHouse == null) true else {
+                pass.destinationHouse.contains(selectedPradosHouse?.labelCasa ?: "", ignoreCase = true)
+            }
+        }.filter { pass ->
+            if (searchQuery.isBlank()) true else {
+                pass.passCode.contains(searchQuery, ignoreCase = true) ||
+                pass.guestName.contains(searchQuery, ignoreCase = true) ||
+                pass.destinationHouse.contains(searchQuery, ignoreCase = true) ||
+                pass.hostResidentName.contains(searchQuery, ignoreCase = true) ||
+                (pass.vehiclePlate ?: "").contains(searchQuery, ignoreCase = true)
+            }
+        }.sortedByDescending { it.createdAtMillis }
+    }
+
+    // 3. Filtrado de eventos próximos vinculados a áreas comunes
+    val upcomingEvents = remember(allEvents, searchQuery, selectedPradosHouse) {
+        val now = System.currentTimeMillis() - (4 * 3600 * 1000L)
         allEvents.filter { event ->
             event.status != "CANCELLED" && (event.endTimeMillis >= now || event.bookingDate >= getTodayDateString())
+        }.filter { event ->
+            if (selectedPradosHouse == null) true else {
+                event.userUnit.contains(selectedPradosHouse?.labelCasa ?: "", ignoreCase = true)
+            }
         }.filter { event ->
             if (searchQuery.isBlank()) true else {
                 event.facilityName.contains(searchQuery, ignoreCase = true) ||
@@ -158,9 +229,13 @@ fun MainDashboardScreen(
         }.sortedBy { it.startTimeMillis }
     }
 
-    // Filtrado de visitantes QR recientes
-    val recentVisitors = remember(allCheckIns, searchQuery) {
+    // 4. Filtrado de visitantes QR recientes en caseta
+    val recentVisitors = remember(allCheckIns, searchQuery, selectedPradosHouse) {
         allCheckIns.filter { checkIn ->
+            if (selectedPradosHouse == null) true else {
+                checkIn.destinationHouse.contains(selectedPradosHouse?.labelCasa ?: "", ignoreCase = true)
+            }
+        }.filter { checkIn ->
             if (searchQuery.isBlank()) true else {
                 checkIn.visitorName.contains(searchQuery, ignoreCase = true) ||
                 checkIn.passCode.contains(searchQuery, ignoreCase = true) ||
@@ -170,15 +245,17 @@ fun MainDashboardScreen(
         }.sortedByDescending { it.timestampMillis }
     }
 
-    // KPIs en tiempo real
+    // KPIs consolidados en tiempo real
+    val activeIncidentsCount = remember(allIncidents) {
+        allIncidents.count { it.status != "RESUELTO" && it.status != "CERRADO" }
+    }
+    val activeQrPassesCount = remember(allQrPasses) {
+        allQrPasses.count { it.isValidForEntry }
+    }
     val activeVisitorsInside = remember(allCheckIns) {
         allCheckIns.count { it.status == "CHECKED_IN" || it.status == "VERIFICADO" }
     }
     val totalEventsCount = remember(upcomingEvents) { upcomingEvents.size }
-    val totalQrScansToday = remember(allCheckIns) {
-        val todayStr = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
-        allCheckIns.count { it.formattedTime.contains(todayStr) || it.status == "CHECKED_IN" }
-    }
 
     LazyColumn(
         modifier = modifier
@@ -191,51 +268,79 @@ fun MainDashboardScreen(
         // =====================================================================
         item {
             ExecutiveHeroDashboardHeader(
-                onTriggerScan = onTriggerScan,
+                onTriggerScan = { showCameraScannerModal = true },
                 onOpenCreateEvent = { showCreateEventModal = true },
-                onOpenQrGenerator = onOpenQrGenerator
+                onOpenQrGenerator = { showCreateQrPassModal = true },
+                onOpenReportIncident = { showReportIncidentModal = true }
             )
         }
 
         // =====================================================================
-        // 2. MÉTRICAS CLAVE (KPIs) EN TIEMPO REAL
+        // 2. MÉTRICAS CLAVE (KPIs) EN TIEMPO REAL: INCIDENCIAS, QR, GARITA Y EVENTOS
         // =====================================================================
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                DashboardKpiCard(
-                    title = "Eventos Áreas",
-                    value = "$totalEventsCount",
-                    subtitle = "Próximas reservas",
-                    icon = Icons.Default.Event,
-                    accentColor = GoldPrimary,
-                    modifier = Modifier.weight(1f)
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DashboardKpiCard(
+                        title = "Incidencias Activas",
+                        value = "$activeIncidentsCount",
+                        subtitle = "Prados Residencial",
+                        icon = Icons.Default.Warning,
+                        accentColor = ErrorRed,
+                        modifier = Modifier.weight(1f)
+                    )
 
-                DashboardKpiCard(
-                    title = "Visitantes QR",
-                    value = "$totalQrScansToday",
-                    subtitle = "Registros hoy",
-                    icon = Icons.Default.QrCodeScanner,
-                    accentColor = CyanNeon,
-                    modifier = Modifier.weight(1f)
-                )
+                    DashboardKpiCard(
+                        title = "Pases QR Activos",
+                        value = "$activeQrPassesCount",
+                        subtitle = "Vigentes para acceso",
+                        icon = Icons.Default.QrCode,
+                        accentColor = CyanNeon,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
 
-                DashboardKpiCard(
-                    title = "En Sitio",
-                    value = "$activeVisitorsInside",
-                    subtitle = "Dentro del complejo",
-                    icon = Icons.Default.Security,
-                    accentColor = SuccessGreen,
-                    modifier = Modifier.weight(1f)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    DashboardKpiCard(
+                        title = "En Garita / Sitio",
+                        value = "$activeVisitorsInside",
+                        subtitle = "Dentro del complejo",
+                        icon = Icons.Default.Security,
+                        accentColor = SuccessGreen,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    DashboardKpiCard(
+                        title = "Eventos Áreas",
+                        value = "$totalEventsCount",
+                        subtitle = "Próximas reservas",
+                        icon = Icons.Default.Event,
+                        accentColor = GoldPrimary,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
         }
 
         // =====================================================================
-        // 3. BARRA DE FILTROS RÁPIDOS Y BÚSQUEDA
+        // 3. BARRA DE FILTRO POR CASA ESPECÍFICA DE PRADOS RESIDENCIAL
+        // =====================================================================
+        item {
+            PradosHouseFilterBar(
+                selectedHouse = selectedPradosHouse,
+                onSelectHouse = { selectedPradosHouse = it },
+                onOpenHousePicker = { showHousePickerModal = true }
+            )
+        }
+
+        // =====================================================================
+        // 4. BARRA DE FILTROS RÁPIDOS Y BÚSQUEDA
         // =====================================================================
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -285,7 +390,7 @@ fun MainDashboardScreen(
                     onValueChange = { searchQuery = it },
                     placeholder = {
                         Text(
-                            text = "Buscar por área, visitante, folio QR, casa o placas...",
+                            text = "Buscar por folio, casa, visitante, placas o incidencia...",
                             fontSize = 12.sp,
                             color = TextMuted
                         )
@@ -328,7 +433,328 @@ fun MainDashboardScreen(
         }
 
         // =====================================================================
-        // 4. SECCIÓN: PRÓXIMOS EVENTOS EN ÁREAS COMUNES
+        // 5. SECCIÓN: INCIDENCIAS VINCULADAS A CASAS DE PRADOS RESIDENCIAL
+        // =====================================================================
+        if (selectedFilter == DashboardFilterCategory.ALL || selectedFilter == DashboardFilterCategory.INCIDENTS) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .background(ErrorRed, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Incidencias de Casas Prados",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = ErrorRed.copy(alpha = 0.2f)
+                            ) {
+                                Text(
+                                    text = "${filteredIncidents.size}",
+                                    color = ErrorRed,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = { showReportIncidentModal = true },
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, ErrorRed.copy(alpha = 0.6f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrorRed),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("btn_new_incident_header")
+                        ) {
+                            Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Reportar", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    // Subfiltros de estado de incidencias
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        val subFilters = listOf(
+                            "ALL" to "Todas (${allIncidents.size})",
+                            "ACTIVE" to "🚨 Activas ($activeIncidentsCount)",
+                            "RESOLVED" to "✅ Resueltas (${allIncidents.count { it.status == "RESUELTO" || it.status == "CERRADO" }})",
+                            "CRITICAL" to "⚠️ Críticas (${allIncidents.count { it.priority == IncidentPriority.CRITICA }})"
+                        )
+                        items(subFilters) { (code, label) ->
+                            val isSelected = incidentSubFilter == code
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) ErrorRed.copy(alpha = 0.25f) else NavySurface,
+                                border = BorderStroke(1.dp, if (isSelected) ErrorRed else Color.White.copy(alpha = 0.12f)),
+                                modifier = Modifier.clickable { incidentSubFilter = code }
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) Color.White else TextMuted,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (filteredIncidents.isEmpty()) {
+                item {
+                    EmptyStateCard(
+                        icon = Icons.Default.CheckCircle,
+                        title = "Sin incidencias pendientes",
+                        message = if (selectedPradosHouse != null) {
+                            "No se registran anomalías en ${selectedPradosHouse?.labelCasa}."
+                        } else {
+                            "No hay incidencias que coincidan con los filtros seleccionados."
+                        },
+                        actionLabel = "Reportar Nueva Incidencia",
+                        onAction = { showReportIncidentModal = true }
+                    )
+                }
+            } else {
+                items(filteredIncidents) { incident ->
+                    PradosIncidentCard(
+                        incident = incident,
+                        onClick = { selectedIncidentDetail = incident },
+                        onAttend = {
+                            scope.launch {
+                                incidentDao.transitionToAttention(incident.folio, attendedBy = "Seguridad / Garita")
+                                Toast.makeText(context, "Incidencia ${incident.folio} pasada a En Atención", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onResolve = {
+                            incidentToResolve = incident
+                        }
+                    )
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+        }
+
+        // =====================================================================
+        // 6. SECCIÓN: PASES QR VINCULADOS A CASAS DE PRADOS RESIDENCIAL
+        // =====================================================================
+        if (selectedFilter == DashboardFilterCategory.ALL || selectedFilter == DashboardFilterCategory.QR_PASSES) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .background(CyanNeon, CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Pases QR Vinculados a Casas",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = CyanNeon.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = "${filteredQrPasses.size}",
+                                color = CyanNeon,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { showCreateQrPassModal = true },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.6f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon),
+                        modifier = Modifier
+                            .height(32.dp)
+                            .testTag("btn_new_qr_pass_header")
+                    ) {
+                        Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Crear Pase", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            if (filteredQrPasses.isEmpty()) {
+                item {
+                    EmptyStateCard(
+                        icon = Icons.Default.QrCode,
+                        title = "Sin pases QR vigentes",
+                        message = if (selectedPradosHouse != null) {
+                            "No hay pases QR activos para ${selectedPradosHouse?.labelCasa}."
+                        } else {
+                            "No se encontraron pases QR que coincidan con la búsqueda."
+                        },
+                        actionLabel = "Generar Nuevo Pase QR",
+                        onAction = { showCreateQrPassModal = true }
+                    )
+                }
+            } else {
+                items(filteredQrPasses) { pass ->
+                    PradosQrPassCard(
+                        pass = pass,
+                        onViewQr = { selectedQrPassForViewer = pass },
+                        onSimulateEntry = {
+                            scope.launch {
+                                val now = System.currentTimeMillis()
+                                val checkIn = VisitorCheckIn(
+                                    folio = AlphaCoreEngine.generateUniqueFolio("CHK"),
+                                    visitorName = pass.guestName,
+                                    visitorDocument = pass.guestDocument,
+                                    destinationHouse = pass.destinationHouse,
+                                    passCode = pass.passCode,
+                                    passTypeLabel = pass.passType.label,
+                                    vehiclePlate = pass.vehiclePlate,
+                                    status = "CHECKED_IN",
+                                    guardNotes = "Ingreso autorizado en Garita Principal de Prados",
+                                    timestampMillis = now,
+                                    hostResidentName = pass.hostResidentName
+                                )
+                                visitorCheckInDao.insertCheckIn(checkIn)
+                                qrPassDao.incrementUsage(pass.passCode)
+                                Toast.makeText(
+                                    context,
+                                    "✅ Ingreso registrado para ${pass.guestName} (${pass.destinationHouse})",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    )
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+        }
+
+        // =====================================================================
+        // 7. SECCIÓN: VISITANTES RECIENTES CON CÓDIGOS QR EN CASETA
+        // =====================================================================
+        if (selectedFilter == DashboardFilterCategory.ALL || selectedFilter == DashboardFilterCategory.QR_VISITORS) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .background(SuccessGreen, CircleShape)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Ingresos Caseta con Código QR",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = SuccessGreen.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = "${recentVisitors.size}",
+                                color = SuccessGreen,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = { showCameraScannerModal = true },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.5f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon),
+                        modifier = Modifier
+                            .height(32.dp)
+                            .testTag("btn_scan_qr_header")
+                    ) {
+                        Icon(imageVector = Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Escanear QR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            if (recentVisitors.isEmpty()) {
+                item {
+                    EmptyStateCard(
+                        icon = Icons.Default.QrCodeScanner,
+                        title = "Sin registros recientes en caseta",
+                        message = "No se han detectado ingresos con código QR que coincidan con los filtros.",
+                        actionLabel = "Abrir Escáner de Acceso",
+                        onAction = { showCameraScannerModal = true }
+                    )
+                }
+            } else {
+                items(recentVisitors) { visitor ->
+                    RecentQrVisitorCard(
+                        visitor = visitor,
+                        onClick = { selectedVisitorDetail = visitor },
+                        onCheckOut = {
+                            scope.launch {
+                                visitorCheckInDao.registerCheckOut(
+                                    id = visitor.id,
+                                    notes = "Salida confirmada desde Dashboard"
+                                )
+                                Toast.makeText(
+                                    context,
+                                    "Salida registrada para ${visitor.visitorName}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    )
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+        }
+
+        // =====================================================================
+        // 8. SECCIÓN: PRÓXIMOS EVENTOS EN ÁREAS COMUNES
         // =====================================================================
         if (selectedFilter == DashboardFilterCategory.ALL || selectedFilter == DashboardFilterCategory.COMMON_AREAS) {
             item {
@@ -405,94 +831,7 @@ fun MainDashboardScreen(
             }
         }
 
-        // =====================================================================
-        // 5. SECCIÓN: VISITANTES RECIENTES CON CÓDIGOS QR
-        // =====================================================================
-        if (selectedFilter == DashboardFilterCategory.ALL || selectedFilter == DashboardFilterCategory.QR_VISITORS) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .background(CyanNeon, CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Visitantes Recientes con Código QR",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = CyanNeon.copy(alpha = 0.2f)
-                        ) {
-                            Text(
-                                text = "${recentVisitors.size}",
-                                color = CyanNeon,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = onTriggerScan,
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.5f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon),
-                        modifier = Modifier
-                            .height(32.dp)
-                            .testTag("btn_scan_qr_header")
-                    ) {
-                        Icon(imageVector = Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Escanear QR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-
-            if (recentVisitors.isEmpty()) {
-                item {
-                    EmptyStateCard(
-                        icon = Icons.Default.QrCodeScanner,
-                        title = "Sin registros recientes de QR",
-                        message = "No se han detectado ingresos con código QR que coincidan con los filtros.",
-                        actionLabel = "Abrir Escáner de Acceso",
-                        onAction = onTriggerScan
-                    )
-                }
-            } else {
-                items(recentVisitors) { visitor ->
-                    RecentQrVisitorCard(
-                        visitor = visitor,
-                        onClick = { selectedVisitorDetail = visitor },
-                        onCheckOut = {
-                            scope.launch {
-                                visitorCheckInDao.registerCheckOut(
-                                    id = visitor.id,
-                                    notes = "Salida confirmada desde Dashboard"
-                                )
-                                Toast.makeText(
-                                    context,
-                                    "Salida registrada para ${visitor.visitorName}",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        }
-                    )
-                }
-            }
-        }
-
-        // Espacio final para asegurar scroll suave y respetar el dock inferior
+        // Espacio final para scroll holgado
         item {
             Spacer(modifier = Modifier.height(48.dp))
         }
@@ -502,14 +841,101 @@ fun MainDashboardScreen(
     // MODALES Y DIÁLOGOS DE ACCIÓN RÁPIDA
     // =========================================================================
 
-    // Modal para Agendar Evento en Área Común
+    // 1. Selector de Casa de Prados Residencial
+    if (showHousePickerModal) {
+        PradosHousePickerDialog(
+            onDismiss = { showHousePickerModal = false },
+            onHouseSelected = { lote ->
+                selectedPradosHouse = lote
+                showHousePickerModal = false
+            }
+        )
+    }
+
+    // 2. Reportar Nueva Incidencia
+    if (showReportIncidentModal) {
+        PradosReportIncidentDialog(
+            onDismiss = { showReportIncidentModal = false },
+            onSaveIncident = { newIncident ->
+                scope.launch {
+                    incidentDao.insertIncident(newIncident)
+                    Toast.makeText(
+                        context,
+                        "🚨 Incidencia registrada: ${newIncident.folio} en ${newIncident.location}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        )
+    }
+
+    // 3. Detalle de Incidencia
+    selectedIncidentDetail?.let { inc ->
+        PradosIncidentDetailDialog(
+            incident = inc,
+            onDismiss = { selectedIncidentDetail = null },
+            onAttend = {
+                scope.launch {
+                    incidentDao.transitionToAttention(inc.folio, attendedBy = "Seguridad / Garita")
+                    Toast.makeText(context, "Incidencia ${inc.folio} en atención", Toast.LENGTH_SHORT).show()
+                    selectedIncidentDetail = null
+                }
+            },
+            onResolve = {
+                incidentToResolve = inc
+                selectedIncidentDetail = null
+            }
+        )
+    }
+
+    // 4. Resolver Incidencia
+    incidentToResolve?.let { inc ->
+        PradosResolveIncidentDialog(
+            incident = inc,
+            onDismiss = { incidentToResolve = null },
+            onConfirmResolve = { notes ->
+                scope.launch {
+                    incidentDao.transitionToResolved(inc.folio, notes = notes, resolvedBy = "Administración Prados")
+                    Toast.makeText(context, "✅ Incidencia ${inc.folio} resuelta con éxito", Toast.LENGTH_LONG).show()
+                    incidentToResolve = null
+                }
+            }
+        )
+    }
+
+    // 5. Generar Nuevo Pase QR
+    if (showCreateQrPassModal) {
+        PradosCreateQrPassDialog(
+            onDismiss = { showCreateQrPassModal = false },
+            onSavePass = { newPass ->
+                scope.launch {
+                    qrPassDao.insertPass(newPass)
+                    selectedQrPassForViewer = newPass
+                    Toast.makeText(
+                        context,
+                        "🔑 Pase QR emitido con folio ${newPass.passCode}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        )
+    }
+
+    // 6. Visor de Código QR en Alta Resolución
+    selectedQrPassForViewer?.let { pass ->
+        PradosQrCodeViewerDialog(
+            pass = pass,
+            onDismiss = { selectedQrPassForViewer = null }
+        )
+    }
+
+    // 7. Modal para Agendar Evento en Área Común
     if (showCreateEventModal) {
         CreateCommonAreaEventDialog(
             onDismiss = { showCreateEventModal = false },
             onSave = { newBooking ->
                 scope.launch {
                     commonAreaDao.insertBooking(newBooking)
-                    // También sincronizar con la tabla de reservas de amenidades
                     db.amenityBookingDao().insertBooking(
                         AmenityBooking(
                             folio = newBooking.folio,
@@ -535,7 +961,7 @@ fun MainDashboardScreen(
         )
     }
 
-    // Modal de Detalle de Evento en Área Común
+    // 8. Modal de Detalle de Evento en Área Común
     selectedEventDetail?.let { event ->
         EventDetailDialog(
             event = event,
@@ -550,7 +976,7 @@ fun MainDashboardScreen(
         )
     }
 
-    // Modal de Detalle de Visitante QR
+    // 9. Modal de Detalle de Visitante QR
     selectedVisitorDetail?.let { visitor ->
         VisitorQrDetailDialog(
             visitor = visitor,
@@ -560,6 +986,34 @@ fun MainDashboardScreen(
                     visitorCheckInDao.registerCheckOut(visitor.id, notes = "Salida confirmada en garita")
                     Toast.makeText(context, "Salida registrada con éxito", Toast.LENGTH_SHORT).show()
                     selectedVisitorDetail = null
+                }
+            }
+        )
+    }
+
+    // 10. Escáner de Códigos QR con CameraX + ZXing (Actualiza Firestore y SQLite)
+    if (showCameraScannerModal) {
+        CameraXQrScannerDialog(
+            onDismiss = { showCameraScannerModal = false },
+            condominiumId = "PRADOS_1",
+            guardName = "Oficial de Seguridad - Garita Prados",
+            onAccessProcessed = { result ->
+                when (result) {
+                    is QrScanProcessResult.Success -> {
+                        Toast.makeText(
+                            context,
+                            "✅ Acceso concedido: ${result.visitorName} a ${result.destinationHouse}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    is QrScanProcessResult.Denied -> {
+                        Toast.makeText(
+                            context,
+                            "⛔ Acceso denegado: ${result.reason}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    else -> {}
                 }
             }
         )
@@ -574,7 +1028,8 @@ fun MainDashboardScreen(
 private fun ExecutiveHeroDashboardHeader(
     onTriggerScan: () -> Unit,
     onOpenCreateEvent: () -> Unit,
-    onOpenQrGenerator: () -> Unit
+    onOpenQrGenerator: () -> Unit,
+    onOpenReportIncident: () -> Unit
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -665,75 +1120,105 @@ private fun ExecutiveHeroDashboardHeader(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Botones de acción rápida
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onTriggerScan,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(40.dp)
-                        .testTag("hero_scan_qr_button"),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = GoldPrimary,
-                        contentColor = NavyDark
-                    ),
-                    shape = RoundedCornerShape(10.dp)
+            // Botones de acción rápida: 2 Filas balanceadas
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.QrCodeScanner,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Escanear QR", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = onTriggerScan,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .testTag("hero_scan_qr_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = GoldPrimary,
+                            contentColor = NavyDark
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCodeScanner,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Escanear QR", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = onOpenReportIncident,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .testTag("hero_report_incident_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = ErrorRed.copy(alpha = 0.2f),
+                            contentColor = ErrorRed
+                        ),
+                        border = BorderStroke(1.dp, ErrorRed.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("+ Incidencia", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
 
-                Button(
-                    onClick = onOpenCreateEvent,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(40.dp)
-                        .testTag("hero_reserve_event_button"),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = CyanNeon.copy(alpha = 0.18f),
-                        contentColor = CyanNeon
-                    ),
-                    border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.5f)),
-                    shape = RoundedCornerShape(10.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.EventAvailable,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("+ Evento", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
+                    Button(
+                        onClick = onOpenQrGenerator,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(38.dp)
+                            .testTag("hero_generate_pass_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CyanNeon.copy(alpha = 0.18f),
+                            contentColor = CyanNeon
+                        ),
+                        border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCode,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp),
+                            tint = CyanNeon
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("+ Pase QR", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
 
-                Button(
-                    onClick = onOpenQrGenerator,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(40.dp)
-                        .testTag("hero_generate_pass_button"),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = NavySurface,
-                        contentColor = Color.White
-                    ),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.QrCode,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = GoldPrimary
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Crear QR", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = onOpenCreateEvent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(38.dp)
+                            .testTag("hero_reserve_event_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NavySurface,
+                            contentColor = Color.White
+                        ),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.EventAvailable,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp),
+                            tint = GoldPrimary
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("+ Evento", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }

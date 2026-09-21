@@ -146,7 +146,7 @@ object FcmNotificationManager {
                     saveTokenToFirestore(token, currentUser, condominiumId)
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.w(TAG, "FCM no disponible en el entorno actual: ${e.message}")
             _fcmStatusMessage.value = "FCM: Operando en modo local seguro"
         }

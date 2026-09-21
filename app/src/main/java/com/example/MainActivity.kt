@@ -70,8 +70,8 @@ class MainActivity : FragmentActivity() {
             SmartNotificationHub.initializeChannels(this)
             ResidentNotificationManager.createNotificationChannel(this)
             AmenityReminderManager.createNotificationChannel(this)
-        } catch (e: Exception) {
-            Log.e(TAG, "Notification channel creation failed: ${e.message}", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Notification channel creation failed: ${t.message}", t)
         }
 
         // Request POST_NOTIFICATIONS on Android 13+ inside try-catch block
@@ -85,8 +85,8 @@ class MainActivity : FragmentActivity() {
                     notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Notification permission request failed: ${e.message}", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Notification permission request failed: ${t.message}", t)
         }
 
         // Execute system diagnostics on launch to log Camera, Database, Firebase, and Network status
@@ -97,8 +97,8 @@ class MainActivity : FragmentActivity() {
             val appDb = AppDatabase.getDatabase(this)
             OfflineSyncEngine.initializeAutoSync(this, appDb)
             Log.i(TAG, "🔄 OfflineSyncEngine initialized: Auto-sync on network reconnection active")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize OfflineSyncEngine: ${e.message}", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to initialize OfflineSyncEngine: ${t.message}", t)
         }
 
         // Inicializar Firebase Cloud Messaging (FCM) para recepción en tiempo real
@@ -109,8 +109,8 @@ class MainActivity : FragmentActivity() {
                 condominiumId = "Los Prados Residencial"
             )
             Log.i(TAG, "🔥 FcmNotificationManager initialized successfully on app launch")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize FcmNotificationManager: ${e.message}", e)
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to initialize FcmNotificationManager: ${t.message}", t)
         }
 
         setContent {

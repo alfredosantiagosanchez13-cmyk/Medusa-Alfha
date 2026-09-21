@@ -145,6 +145,7 @@ import androidx.compose.material.icons.filled.FactCheck
 import com.example.ui.components.FieldValidationChecklistHub
 
 enum class MasterAlphaRoleView(val title: String, val subtitle: String, val icon: ImageVector) {
+    VISITOR_INCIDENT_SUMMARY("TABLERO RESUMEN", "Bitácora en Tiempo Real e Incidencias con Gráficos Room", Icons.Default.Assessment),
     FIELD_VALIDATION("VALIDACIÓN CAMPO", "Checklist de 16 Pruebas Físicas de Garita y Trazabilidad", Icons.Default.FactCheck),
     OFFLINE_CONTINUITY("CONTINUIDAD OFFLINE", "FASE 19: Cola de Sincronización, Idempotencia y Estado de Red", Icons.Default.CloudSync),
     VEHICULAR_CONTROL("CONTROL VEHICULAR", "FASE 15: Padrón Vehicular, RFID/QR, Accesos y Alertas", Icons.Default.DirectionsCar),
@@ -459,6 +460,11 @@ fun MasterPanelAlphaScreen(
 
         // Dynamic View Content
         when (selectedView) {
+            MasterAlphaRoleView.VISITOR_INCIDENT_SUMMARY -> {
+                com.example.ui.components.RoomSecuritySummaryDashboardComponent(
+                    condominiumName = "Los Prados Residencial"
+                )
+            }
             MasterAlphaRoleView.FIELD_VALIDATION -> {
                 FieldValidationChecklistHub(
                     db = db
