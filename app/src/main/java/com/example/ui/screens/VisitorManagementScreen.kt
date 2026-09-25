@@ -45,11 +45,15 @@ import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Warning
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.viewmodel.VisitorManagementViewModel
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -108,6 +112,8 @@ import com.example.ui.theme.SuccessGreen
 import com.example.ui.theme.TextMuted
 import com.example.ui.theme.WarningOrange
 import com.example.utils.ResidentNotificationManager
+import com.example.ui.components.CameraXVisitorScannerDialog
+import com.example.ui.components.VisitorScanResult
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
 import kotlinx.coroutines.Dispatchers
@@ -132,39 +138,36 @@ fun VisitorManagementScreen(
     condominiumId: String = "PRADOS_1",
     userUnit: String = "Casa #104",
     userName: String = "Carlos Mendoza",
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    viewModel: VisitorManagementViewModel = viewModel(
+        key = "VisitorManagementViewModel_$condominiumId",
+        factory = VisitorManagementViewModel.provideFactory(db, condominiumId)
+    )
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val repository = remember {
-        VisitorCheckInRepository(db.visitorCheckInDao(), activeCondominiumId = condominiumId)
-    }
+    val repository = viewModel.repository
 
-    val checkIns by repository.allCheckIns.collectAsState(initial = emptyList())
-    val qrPasses by db.qrPassDao().getAllPassesFlow().collectAsState(initial = emptyList())
+    val checkIns by viewModel.allCheckIns.collectAsState()
+    val qrPasses by viewModel.allQrPasses.collectAsState()
     val qrPassMap = remember(qrPasses) { qrPasses.associateBy { it.passCode } }
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("TODOS") }
     var showRegisterModal by remember { mutableStateOf(false) }
     var showGenerateTimedTokenDialog by remember { mutableStateOf(false) }
+    var showVisitorScannerDialog by remember { mutableStateOf(false) }
     var showAdminVisitorTracking by remember { mutableStateOf(false) }
     var activeTimedTokenModal by remember { mutableStateOf<VisitorAccessTokenInfo?>(null) }
     var qrPassToShow by remember { mutableStateOf<VisitorCheckIn?>(null) }
     var detailEntryToShow by remember { mutableStateOf<VisitorCheckIn?>(null) }
-    var isSyncing by remember { mutableStateOf(false) }
-    var syncMessage by remember { mutableStateOf("Sincronizado con Firestore") }
+    val isSyncing by viewModel.isSyncing.collectAsState()
+    val syncMessage by viewModel.syncMessage.collectAsState()
+    val securityRuleAlert by viewModel.securityRuleAlert.collectAsState()
 
-    // Al inicio, sembrar datos de prueba si Room está vacío e intentar sincronizar desde Firestore
-    LaunchedEffect(Unit) {
-        repository.seedInitialCheckInsIfEmpty()
-        try {
-            val syncRes = repository.syncFromFirestore(condominiumId)
-            if (syncRes.isSuccess) {
-                val count = syncRes.getOrDefault(0)
-                syncMessage = if (count > 0) "Firestore: $count nuevos logs" else "Nube Firestore al día"
-            }
-        } catch (_: Exception) {}
+    // Inicialización y sincronización segura en segundo plano (Dispatchers.IO)
+    LaunchedEffect(condominiumId) {
+        viewModel.initializeSafeDataTransition(condominiumId)
     }
 
     // Métricas de KPIs
@@ -212,6 +215,57 @@ fun VisitorManagementScreen(
             .fillMaxSize()
             .testTag("visitor_management_screen")
     ) {
+        // AVISO / BANNER DE REGLAS DE SEGURIDAD O ERROR DE PERMISOS EN FIRESTORE
+        AnimatedVisibility(visible = securityRuleAlert != null) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp)
+                    .testTag("banner_firestore_permission_warning"),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF3B1818),
+                border = BorderStroke(1.dp, WarningOrange)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Alerta de Reglas de Seguridad",
+                        tint = WarningOrange,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Aviso de Seguridad en Firestore",
+                            color = WarningOrange,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = securityRuleAlert ?: "",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp
+                        )
+                    }
+                    IconButton(
+                        onClick = { viewModel.clearSecurityRuleAlert() },
+                        modifier = Modifier.size(26.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cerrar",
+                            tint = TextMuted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
         // ENCABEZADO PRINCIPAL DE LA PANTALLA
         Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -278,19 +332,8 @@ fun VisitorManagementScreen(
                     // Botón de sincronización con Firestore
                     IconButton(
                         onClick = {
-                            if (isSyncing) return@IconButton
-                            isSyncing = true
-                            scope.launch {
-                                val res = repository.syncFromFirestore(condominiumId)
-                                isSyncing = false
-                                if (res.isSuccess) {
-                                    val count = res.getOrDefault(0)
-                                    syncMessage = "Firestore: $count actualizados"
-                                    Toast.makeText(context, "✅ Sincronizado con Firestore ($count logs)", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    syncMessage = "Modo Local Autónomo (Room)"
-                                    Toast.makeText(context, "Sincronización local completada", Toast.LENGTH_SHORT).show()
-                                }
+                            viewModel.syncWithFirestore(condominiumId) { success, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                             }
                         },
                         modifier = Modifier.testTag("btn_sync_firestore")
@@ -337,11 +380,14 @@ fun VisitorManagementScreen(
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.CloudDone, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(12.dp))
+                            val isRuleAlert = securityRuleAlert != null
+                            val statusIcon = if (isRuleAlert) Icons.Default.Warning else Icons.Default.CloudDone
+                            val statusTint = if (isRuleAlert) WarningOrange else SuccessGreen
+                            Icon(statusIcon, contentDescription = null, tint = statusTint, modifier = Modifier.size(12.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = syncMessage,
-                                color = TextMuted,
+                                color = if (isRuleAlert) WarningOrange else TextMuted,
                                 fontSize = 10.sp
                             )
                         }
@@ -383,11 +429,43 @@ fun VisitorManagementScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Acciones Principales para Residentes: Generar Token Temporal o Registrar Visita
+                // Acciones Principales para Residentes y Seguridad
                 Column(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    Button(
+                        onClick = { showVisitorScannerDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = Color.White),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("btn_scan_visitor_camerax")
+                    ) {
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Escanear Pase QR (CameraX + ZXing)",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = Color.Black.copy(alpha = 0.25f)
+                        ) {
+                            Text(
+                                text = "SENSOR ÓPTICO",
+                                color = Color.White,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
                     Button(
                         onClick = { showGenerateTimedTokenDialog = true },
                         colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = NavyDark),
@@ -561,89 +639,112 @@ fun VisitorManagementScreen(
                         entry = entry,
                         qrPass = pass,
                         onCheckIn = {
-                            scope.launch {
-                                repository.registerCheckInEntry(entry.id, notes = "Ingreso registrado por residente/garita")
-                                ResidentNotificationManager.notifyCustomVisitorEntry(
-                                    context = context,
-                                    guestName = entry.visitorName,
-                                    destinationHouse = entry.destinationHouse,
-                                    hostResidentName = entry.hostResidentName,
-                                    passTypeLabel = entry.passTypeLabel,
-                                    vehiclePlate = entry.vehiclePlate
-                                )
-                                Toast.makeText(context, "✅ Ingreso registrado y sincronizado en Firestore", Toast.LENGTH_SHORT).show()
+                            viewModel.registerCheckIn(
+                                checkInId = entry.id,
+                                folio = entry.folio,
+                                visitorName = entry.visitorName,
+                                destinationHouse = entry.destinationHouse,
+                                guardName = userName,
+                                passTypeLabel = entry.passTypeLabel
+                            ) { success, msg ->
+                                if (success) {
+                                    ResidentNotificationManager.notifyCustomVisitorEntry(
+                                        context = context,
+                                        guestName = entry.visitorName,
+                                        destinationHouse = entry.destinationHouse,
+                                        hostResidentName = entry.hostResidentName,
+                                        passTypeLabel = entry.passTypeLabel,
+                                        vehiclePlate = entry.vehiclePlate
+                                    )
+                                }
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                             }
                         },
                         onCheckOut = {
-                            scope.launch {
-                                repository.registerCheckOut(entry.id, notes = "Salida confirmada en sistema")
-                                Toast.makeText(context, "👋 Salida registrada en Firestore", Toast.LENGTH_SHORT).show()
+                            viewModel.registerCheckOut(
+                                checkInId = entry.id,
+                                folio = entry.folio,
+                                visitorName = entry.visitorName,
+                                destinationHouse = entry.destinationHouse,
+                                guardName = userName
+                            ) { _, msg ->
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                             }
                         },
                         onShowQr = {
-                            scope.launch {
-                                val resolvedPass = pass ?: withContext(Dispatchers.IO) { db.qrPassDao().getPassByCode(entry.passCode) }
-                                if (resolvedPass != null) {
-                                    val durationH = ((resolvedPass.validUntilMillis - resolvedPass.createdAtMillis) / (3600 * 1000L)).toInt().coerceAtLeast(1)
-                                    activeTimedTokenModal = VisitorAccessTokenInfo(
-                                        tokenId = "TOK-${entry.folio.takeLast(6)}-${resolvedPass.passCode.takeLast(4)}",
-                                        passCode = resolvedPass.passCode,
-                                        folio = entry.folio,
-                                        visitorName = resolvedPass.guestName,
-                                        visitorDocument = resolvedPass.guestDocument,
-                                        destinationHouse = resolvedPass.destinationHouse,
-                                        hostResidentName = resolvedPass.hostResidentName,
-                                        passTypeLabel = entry.passTypeLabel,
-                                        vehiclePlate = resolvedPass.vehiclePlate,
-                                        issuedAtMillis = resolvedPass.createdAtMillis,
-                                        validUntilMillis = resolvedPass.validUntilMillis,
-                                        durationHours = durationH,
-                                        maxEntries = resolvedPass.maxEntries,
-                                        currentEntriesCount = resolvedPass.currentEntriesCount,
-                                        integrityHash = resolvedPass.integrityHash,
-                                        residentNotes = resolvedPass.note,
-                                        isActive = resolvedPass.isActive
-                                    )
-                                } else {
-                                    val now = System.currentTimeMillis()
-                                    val validUntil = now + (24 * 3600 * 1000L)
-                                    val hash = AlphaCoreEngine.computeIntegrityHash(entry.passCode, entry.visitorDocument, entry.destinationHouse)
-                                    val newPass = QrPassRoomEntity(
-                                        passCode = entry.passCode,
-                                        guestName = entry.visitorName,
-                                        guestDocument = entry.visitorDocument,
-                                        destinationHouse = entry.destinationHouse,
-                                        hostResidentName = entry.hostResidentName,
-                                        vehiclePlate = entry.vehiclePlate,
-                                        passType = PassType.VISITOR_SINGLE,
-                                        validUntilMillis = validUntil,
-                                        maxEntries = 1,
-                                        currentEntriesCount = 0,
-                                        note = "Pase QR temporal generado para ${entry.visitorName}",
-                                        createdAtMillis = now,
-                                        integrityHash = hash,
-                                        isActive = true
-                                    )
-                                    withContext(Dispatchers.IO) { db.qrPassDao().insertPass(newPass) }
-                                    activeTimedTokenModal = VisitorAccessTokenInfo(
-                                        tokenId = "TOK-${entry.folio.takeLast(6)}-${entry.passCode.takeLast(4)}",
-                                        passCode = entry.passCode,
-                                        folio = entry.folio,
-                                        visitorName = entry.visitorName,
-                                        visitorDocument = entry.visitorDocument,
-                                        destinationHouse = entry.destinationHouse,
-                                        hostResidentName = entry.hostResidentName,
-                                        passTypeLabel = entry.passTypeLabel,
-                                        vehiclePlate = entry.vehiclePlate,
-                                        issuedAtMillis = now,
-                                        validUntilMillis = validUntil,
-                                        durationHours = 24,
-                                        maxEntries = 1,
-                                        currentEntriesCount = 0,
-                                        integrityHash = hash,
-                                        residentNotes = entry.residentNotes,
-                                        isActive = true
-                                    )
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val resolvedPass = pass ?: db.qrPassDao().getPassByCode(entry.passCode)
+                                    if (resolvedPass != null) {
+                                        val durationH = ((resolvedPass.validUntilMillis - resolvedPass.createdAtMillis) / (3600 * 1000L)).toInt().coerceAtLeast(1)
+                                        withContext(Dispatchers.Main) {
+                                            activeTimedTokenModal = VisitorAccessTokenInfo(
+                                                tokenId = "TOK-${entry.folio.takeLast(6)}-${resolvedPass.passCode.takeLast(4)}",
+                                                passCode = resolvedPass.passCode,
+                                                folio = entry.folio,
+                                                visitorName = resolvedPass.guestName,
+                                                visitorDocument = resolvedPass.guestDocument,
+                                                destinationHouse = resolvedPass.destinationHouse,
+                                                hostResidentName = resolvedPass.hostResidentName,
+                                                passTypeLabel = entry.passTypeLabel,
+                                                vehiclePlate = resolvedPass.vehiclePlate,
+                                                issuedAtMillis = resolvedPass.createdAtMillis,
+                                                validUntilMillis = resolvedPass.validUntilMillis,
+                                                durationHours = durationH,
+                                                maxEntries = resolvedPass.maxEntries,
+                                                currentEntriesCount = resolvedPass.currentEntriesCount,
+                                                integrityHash = resolvedPass.integrityHash,
+                                                residentNotes = resolvedPass.note,
+                                                isActive = resolvedPass.isActive
+                                            )
+                                        }
+                                    } else {
+                                        val now = System.currentTimeMillis()
+                                        val validUntil = now + (24 * 3600 * 1000L)
+                                        val hash = AlphaCoreEngine.computeIntegrityHash(entry.passCode, entry.visitorDocument, entry.destinationHouse)
+                                        val newPass = QrPassRoomEntity(
+                                            passCode = entry.passCode,
+                                            guestName = entry.visitorName,
+                                            guestDocument = entry.visitorDocument,
+                                            destinationHouse = entry.destinationHouse,
+                                            hostResidentName = entry.hostResidentName,
+                                            vehiclePlate = entry.vehiclePlate,
+                                            passType = PassType.VISITOR_SINGLE,
+                                            validUntilMillis = validUntil,
+                                            maxEntries = 1,
+                                            currentEntriesCount = 0,
+                                            note = "Pase QR temporal generado para ${entry.visitorName}",
+                                            createdAtMillis = now,
+                                            integrityHash = hash,
+                                            isActive = true
+                                        )
+                                        db.qrPassDao().insertPass(newPass)
+                                        withContext(Dispatchers.Main) {
+                                            activeTimedTokenModal = VisitorAccessTokenInfo(
+                                                tokenId = "TOK-${entry.folio.takeLast(6)}-${entry.passCode.takeLast(4)}",
+                                                passCode = entry.passCode,
+                                                folio = entry.folio,
+                                                visitorName = entry.visitorName,
+                                                visitorDocument = entry.visitorDocument,
+                                                destinationHouse = entry.destinationHouse,
+                                                hostResidentName = entry.hostResidentName,
+                                                passTypeLabel = entry.passTypeLabel,
+                                                vehiclePlate = entry.vehiclePlate,
+                                                issuedAtMillis = now,
+                                                validUntilMillis = validUntil,
+                                                durationHours = 24,
+                                                maxEntries = 1,
+                                                currentEntriesCount = 0,
+                                                integrityHash = hash,
+                                                residentNotes = entry.residentNotes,
+                                                isActive = true
+                                            )
+                                        }
+                                    }
+                                } catch (e: Throwable) {
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(context, "Aviso local: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         },
@@ -652,6 +753,35 @@ fun VisitorManagementScreen(
                 }
             }
         }
+    }
+
+    // MODAL DE ESCÁNER CAMERAX + ZXING PARA CÓDIGOS DE VISITANTES
+    if (showVisitorScannerDialog) {
+        CameraXVisitorScannerDialog(
+            isOpen = showVisitorScannerDialog,
+            condominiumId = condominiumId,
+            guardName = userName,
+            onDismissRequest = { showVisitorScannerDialog = false },
+            onVisitorScanned = { result ->
+                when (result) {
+                    is VisitorScanResult.Success -> {
+                        Toast.makeText(
+                            context,
+                            "✅ Ingreso Registrado: ${result.visitorCheckIn.visitorName} -> ${result.visitorCheckIn.destinationHouse}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    is VisitorScanResult.Denied -> {
+                        Toast.makeText(
+                            context,
+                            "❌ Acceso Denegado: ${result.reason}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    else -> {}
+                }
+            }
+        )
     }
 
     // MODAL DE GENERACIÓN DE PASE QR CON TOKEN TEMPORAL
@@ -682,7 +812,8 @@ fun VisitorManagementScreen(
                 Toast.makeText(context, "🎉 Invitado registrado exitosamente en Firestore", Toast.LENGTH_LONG).show()
             },
             repository = repository,
-            db = db
+            db = db,
+            viewModel = viewModel
         )
     }
 
@@ -965,7 +1096,8 @@ private fun GuestRegistrationDialog(
     onDismiss: () -> Unit,
     onGuestRegistered: (VisitorCheckIn) -> Unit,
     repository: VisitorCheckInRepository,
-    db: AppDatabase
+    db: AppDatabase,
+    viewModel: VisitorManagementViewModel? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -1297,45 +1429,78 @@ private fun GuestRegistrationDialog(
                     onClick = {
                         if (visitorName.isBlank() || authorizedUnit.isBlank()) return@Button
                         isSaving = true
-                        scope.launch {
-                            val result = repository.registerGuestAndLogToFirestore(
+                        if (viewModel != null) {
+                            viewModel.registerGuest(
                                 condominiumId = condominiumId,
                                 visitorName = visitorName,
                                 authorizedUnitNumber = authorizedUnit,
                                 hostResidentName = hostResidentName,
                                 visitorDocument = visitorDocument.ifBlank { "Sin Documento" },
-                                passTypeLabel = "$selectedPassType (Token ${durationHours}h)",
+                                passTypeLabel = selectedPassType,
+                                durationHours = durationHours,
                                 vehiclePlate = if (isVehicular) vehiclePlate else null,
                                 residentNotes = residentNotes.ifBlank { null },
                                 isImmediateCheckIn = isImmediateCheckIn
-                            )
-                            isSaving = false
-                            result.onSuccess { saved ->
-                                val now = System.currentTimeMillis()
-                                val validUntil = now + (durationHours.toLong() * 3600 * 1000L)
-                                val hash = AlphaCoreEngine.computeIntegrityHash(saved.passCode, saved.visitorDocument, saved.destinationHouse)
-                                val qrPass = QrPassRoomEntity(
-                                    passCode = saved.passCode,
-                                    guestName = saved.visitorName,
-                                    guestDocument = saved.visitorDocument,
-                                    destinationHouse = saved.destinationHouse,
-                                    hostResidentName = saved.hostResidentName,
-                                    vehiclePlate = saved.vehiclePlate,
-                                    passType = PassType.VISITOR_SINGLE,
-                                    validUntilMillis = validUntil,
-                                    maxEntries = 1,
-                                    currentEntriesCount = 0,
-                                    note = "Token temporal (${durationHours}h). ${saved.residentNotes ?: ""}".trim(),
-                                    createdAtMillis = now,
-                                    integrityHash = hash,
-                                    isActive = true
-                                )
-                                withContext(Dispatchers.IO) {
-                                    db.qrPassDao().insertPass(qrPass)
+                            ) { result ->
+                                isSaving = false
+                                result.onSuccess { saved ->
+                                    onGuestRegistered(saved)
+                                }.onFailure { err ->
+                                    Toast.makeText(context, "Aviso: ${err.message}", Toast.LENGTH_SHORT).show()
                                 }
-                                onGuestRegistered(saved)
-                            }.onFailure { err ->
-                                Toast.makeText(context, "Error: ${err.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val result = repository.registerGuestAndLogToFirestore(
+                                        condominiumId = condominiumId,
+                                        visitorName = visitorName,
+                                        authorizedUnitNumber = authorizedUnit,
+                                        hostResidentName = hostResidentName,
+                                        visitorDocument = visitorDocument.ifBlank { "Sin Documento" },
+                                        passTypeLabel = "$selectedPassType (Token ${durationHours}h)",
+                                        vehiclePlate = if (isVehicular) vehiclePlate else null,
+                                        residentNotes = residentNotes.ifBlank { null },
+                                        isImmediateCheckIn = isImmediateCheckIn
+                                    )
+                                    withContext(Dispatchers.Main) {
+                                        isSaving = false
+                                        result.onSuccess { saved ->
+                                            scope.launch(Dispatchers.IO) {
+                                                try {
+                                                    val now = System.currentTimeMillis()
+                                                    val validUntil = now + (durationHours.toLong() * 3600 * 1000L)
+                                                    val hash = AlphaCoreEngine.computeIntegrityHash(saved.passCode, saved.visitorDocument, saved.destinationHouse)
+                                                    val qrPass = QrPassRoomEntity(
+                                                        passCode = saved.passCode,
+                                                        guestName = saved.visitorName,
+                                                        guestDocument = saved.visitorDocument,
+                                                        destinationHouse = saved.destinationHouse,
+                                                        hostResidentName = saved.hostResidentName,
+                                                        vehiclePlate = saved.vehiclePlate,
+                                                        passType = PassType.VISITOR_SINGLE,
+                                                        validUntilMillis = validUntil,
+                                                        maxEntries = 1,
+                                                        currentEntriesCount = 0,
+                                                        note = "Token temporal (${durationHours}h). ${saved.residentNotes ?: ""}".trim(),
+                                                        createdAtMillis = now,
+                                                        integrityHash = hash,
+                                                        isActive = true
+                                                    )
+                                                    db.qrPassDao().insertPass(qrPass)
+                                                } catch (_: Throwable) {}
+                                            }
+                                            onGuestRegistered(saved)
+                                        }.onFailure { err ->
+                                            Toast.makeText(context, "Aviso: ${err.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                } catch (e: Throwable) {
+                                    withContext(Dispatchers.Main) {
+                                        isSaving = false
+                                        Toast.makeText(context, "Aviso: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             }
                         }
                     },

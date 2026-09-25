@@ -122,8 +122,11 @@ object QrPayloadParser {
             val plate = extractJsonField(trimmed, "vehiclePlate")
                 ?: extractJsonField(trimmed, "plates")
                 ?: extractJsonField(trimmed, "plate")
-            val type = extractJsonField(trimmed, "passType")
-                ?: if (isResident) "RESIDENT_PERMANENT" else null
+            val type = if (isResident) {
+                "RESIDENT_PERMANENT"
+            } else {
+                extractJsonField(trimmed, "passType") ?: extractJsonField(trimmed, "type")
+            }
 
             return ParsedQrPass(
                 passCode = extractedCode,

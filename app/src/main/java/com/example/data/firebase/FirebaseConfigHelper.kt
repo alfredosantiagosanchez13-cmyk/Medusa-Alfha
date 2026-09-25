@@ -49,7 +49,7 @@ object FirebaseConfigHelper {
                 configureFirestoreSettings()
                 true
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.w(TAG, "Firebase no configurado o google-services.json ausente: ${e.message}")
             _isFirebaseAvailable.value = false
             _initializationStatusMessage.value = "Modo Local Autónomo (Room SQLite). Para activar la nube, configure google-services.json."
@@ -65,7 +65,7 @@ object FirebaseConfigHelper {
                 .build()
             firestore.firestoreSettings = settings
             Log.i(TAG, "Firestore configurado con persistencia offline activa.")
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             Log.w(TAG, "No se pudo aplicar configuración de Firestore: ${e.message}")
         }
     }

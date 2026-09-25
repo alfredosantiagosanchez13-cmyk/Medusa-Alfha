@@ -92,25 +92,27 @@ class MainActivity : FragmentActivity() {
         // Execute system diagnostics on launch to log Camera, Database, Firebase, and Network status
         runSystemDiagnostics()
 
-        // FASE 19: Inicializar Motor de Sincronización Automática Offline/Online
-        try {
-            val appDb = AppDatabase.getDatabase(this)
-            OfflineSyncEngine.initializeAutoSync(this, appDb)
-            Log.i(TAG, "🔄 OfflineSyncEngine initialized: Auto-sync on network reconnection active")
-        } catch (t: Throwable) {
-            Log.e(TAG, "Failed to initialize OfflineSyncEngine: ${t.message}", t)
-        }
+        // Inicializar Motor de Sincronización Automática Offline/Online y FCM en hilo de fondo
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val appDb = AppDatabase.getDatabase(applicationContext)
+                OfflineSyncEngine.initializeAutoSync(applicationContext, appDb)
+                Log.i(TAG, "🔄 OfflineSyncEngine initialized safely on Dispatchers.IO")
+            } catch (t: Throwable) {
+                Log.e(TAG, "Safe fallback: Failed to initialize OfflineSyncEngine: ${t.message}", t)
+            }
 
-        // Inicializar Firebase Cloud Messaging (FCM) para recepción en tiempo real
-        try {
-            com.example.data.fcm.FcmNotificationManager.initialize(
-                context = this,
-                currentUser = null,
-                condominiumId = "Los Prados Residencial"
-            )
-            Log.i(TAG, "🔥 FcmNotificationManager initialized successfully on app launch")
-        } catch (t: Throwable) {
-            Log.e(TAG, "Failed to initialize FcmNotificationManager: ${t.message}", t)
+            // Inicializar Firebase Cloud Messaging (FCM) de forma segura en hilo de fondo
+            try {
+                com.example.data.fcm.FcmNotificationManager.initialize(
+                    context = applicationContext,
+                    currentUser = null,
+                    condominiumId = "Los Prados Residencial"
+                )
+                Log.i(TAG, "🔥 FcmNotificationManager initialized successfully on Dispatchers.IO")
+            } catch (t: Throwable) {
+                Log.w(TAG, "Safe fallback: FCM initialization skipped or offline: ${t.message}")
+            }
         }
 
         setContent {
