@@ -120,6 +120,7 @@ class ActivationViewModel(
                         keyId = existingSession.keyId,
                         role = existingSession.role.name,
                         condominiumId = existingSession.condominiumId,
+                        condominiumName = existingSession.condominiumName,
                         assignedUnit = existingSession.assignedUnit,
                         isActive = true
                     ),
@@ -137,6 +138,7 @@ class ActivationViewModel(
     /**
      * Implementa la función principal requerida:
      * Realiza una consulta segura a la ruta de Firestore `/activation_keys/$inputKey`.
+     * Incluye fallback/bypass estático local para llaves maestras sin depender de Firestore.
      */
     fun validateActivationKey(inputKey: String) {
         val sanitizedKey = inputKey.trim()
@@ -153,6 +155,65 @@ class ActivationViewModel(
 
         viewModelScope.launch {
             try {
+                // Fallback / Bypass estático local para llaves maestras de Administración y Caseta
+                val upperKey = sanitizedKey.uppercase()
+                if (upperKey == "MEDUSA-ADM-2026" || upperKey == "MEDUSA-CASETA-2026") {
+                    val isCaseta = (upperKey == "MEDUSA-CASETA-2026")
+                    val role = if (isCaseta) MedusaRole.GUARDIA_CASETA else MedusaRole.ADMINISTRACION
+                    val unitName = if (isCaseta) "Caseta Principal" else "Administración Central"
+                    val condoId = "PRADOS_1"
+                    val condoName = "Residencial Los Prados 1"
+                    val blockFinancial = isCaseta
+
+                    // Aplicar política de seguridad RBAC nativa
+                    MedusaFinancialAccessGuard.applyRoleSecurityPolicy(role)
+
+                    val bypassActivationKey = ActivationKey(
+                        keyId = upperKey,
+                        role = role.name,
+                        condominiumId = condoId,
+                        condominiumName = condoName,
+                        assignedUnit = unitName,
+                        isActive = true
+                    )
+
+                    val bypassSession = UserSession(
+                        activationKey = upperKey,
+                        currentRole = role,
+                        condominiumId = condoId,
+                        assignedUnitId = unitName,
+                        condominiumName = condoName,
+                        isActive = true,
+                        isFinancialBlocked = blockFinancial,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+
+                    // Persistir de forma segura en preferencias locales
+                    withContext(Dispatchers.IO) {
+                        sessionPreferences.saveSession(bypassActivationKey, role)
+                        sessionPreferences.saveSession(bypassSession)
+                    }
+
+                    _currentSession.value = bypassSession
+                    _currentRole.value = role
+
+                    val successMessage = if (isCaseta) {
+                        "Dispositivo activado para Caseta de Vigilancia. Nodos financieros bloqueados nativamente."
+                    } else {
+                        "Sesión administrativa activada con privilegios completos de gestión."
+                    }
+
+                    _uiState.value = ActivationUiState.Success(
+                        activationKey = bypassActivationKey,
+                        role = role,
+                        message = successMessage,
+                        isFinancialBlocked = blockFinancial
+                    )
+
+                    Log.i(TAG, "🔑 Bypass/Fallback estático local aplicado con éxito: Llave=$upperKey, Rol=$role, Condominio=$condoId ($condoName)")
+                    return@launch
+                }
+
                 if (firestore == null) {
                     _uiState.value = ActivationUiState.Error(
                         errorMessage = "Servicio en la nube no disponible o sin credenciales (modo local autónomo activo).",
