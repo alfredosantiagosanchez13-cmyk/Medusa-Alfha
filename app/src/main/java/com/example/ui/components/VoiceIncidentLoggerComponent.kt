@@ -41,6 +41,9 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Warning
+import com.example.data.ai.MedusaVoiceEngine
+import com.example.data.ai.VoiceExecutionResult
+import com.example.data.auth.MedusaRole
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -107,6 +110,7 @@ fun VoiceIncidentLoggerComponent(
     var isListening by remember { mutableStateOf(false) }
     var currentTranscript by remember { mutableStateOf("") }
     var categorizedIncident by remember { mutableStateOf<VoiceIncident?>(null) }
+    var voiceSecurityError by remember { mutableStateOf<String?>(null) }
 
     // Seed initial incident if empty
     LaunchedEffect(Unit) {
@@ -129,7 +133,7 @@ fun VoiceIncidentLoggerComponent(
         }
     }
 
-    // Speech Recognizer Intent Launcher
+    // Speech Recognizer Intent Launcher con Interceptor de Voz Zero-Trust
     val speechIntentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -141,7 +145,21 @@ fun VoiceIncidentLoggerComponent(
 
             if (spokenText.isNotBlank()) {
                 currentTranscript = spokenText
-                categorizedIncident = VoiceIncidentCategorizer.analyzeAndCategorize(spokenText)
+                scope.launch {
+                    val interceptResult = MedusaVoiceEngine.interceptAndExecuteVoiceCommand(
+                        spokenText = spokenText,
+                        role = MedusaRole.GUARDIA_CASETA,
+                        db = db,
+                        operatorName = "Guardia de Caseta (Voz)"
+                    )
+                    if (interceptResult is VoiceExecutionResult.Blocked) {
+                        voiceSecurityError = interceptResult.reason
+                        categorizedIncident = null
+                    } else {
+                        voiceSecurityError = null
+                        categorizedIncident = VoiceIncidentCategorizer.analyzeAndCategorize(spokenText)
+                    }
+                }
             }
         }
     }
@@ -309,8 +327,23 @@ fun VoiceIncidentLoggerComponent(
                         voicePresets.forEach { preset ->
                             Surface(
                                 onClick = {
-                                    currentTranscript = preset
-                                    categorizedIncident = VoiceIncidentCategorizer.analyzeAndCategorize(preset)
+                                    scope.launch {
+                                        val interceptResult = MedusaVoiceEngine.interceptAndExecuteVoiceCommand(
+                                            spokenText = preset,
+                                            role = MedusaRole.GUARDIA_CASETA,
+                                            db = db,
+                                            operatorName = "Guardia de Caseta (Preset)"
+                                        )
+                                        if (interceptResult is VoiceExecutionResult.Blocked) {
+                                            voiceSecurityError = interceptResult.reason
+                                            categorizedIncident = null
+                                            currentTranscript = preset
+                                        } else {
+                                            voiceSecurityError = null
+                                            currentTranscript = preset
+                                            categorizedIncident = VoiceIncidentCategorizer.analyzeAndCategorize(preset)
+                                        }
+                                    }
                                 },
                                 shape = RoundedCornerShape(6.dp),
                                 color = NavyCard,
@@ -327,6 +360,49 @@ fun VoiceIncidentLoggerComponent(
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                                 )
                             }
+                        }
+                    }
+                }
+            }
+
+            // Alerta de Bloqueo por Aislamiento Zero-Trust de Voz
+            AnimatedVisibility(visible = voiceSecurityError != null) {
+                Surface(
+                    color = ErrorRed.copy(alpha = 0.2f),
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.2.dp, ErrorRed),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Acceso Restringido",
+                            tint = ErrorRed,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "SEGURIDAD_MEDUSA: ACCESO RESTRINGIDO",
+                                color = ErrorRed,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = voiceSecurityError ?: "",
+                                color = Color.White,
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                text = "🔒 Transcripción congelada y bloqueada. Violación registrada en auditoría inmutable.",
+                                color = TextMuted,
+                                fontSize = 9.sp
+                            )
                         }
                     }
                 }

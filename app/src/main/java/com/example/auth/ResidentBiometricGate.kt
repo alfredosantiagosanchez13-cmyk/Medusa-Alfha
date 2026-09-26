@@ -135,4 +135,38 @@ object ResidentBiometricGate {
             onDenied = onDenied
         )
     }
+
+    /**
+     * Muro de protección biométrica para el acceso a la aplicación (Pantalla de Acceso/Enrolamiento).
+     */
+    fun authenticateAppAccess(
+        context: Context,
+        onAuthorized: () -> Unit,
+        onDenied: (String) -> Unit
+    ) {
+        authenticateCriticalAction(
+            context = context,
+            title = "Autenticación Biométrica de Acceso",
+            subtitle = "Confirme con su huella dactilar o rostro para acceder a su perfil en MEDUSA ALFHA",
+            onAuthorized = onAuthorized,
+            onDenied = onDenied
+        )
+    }
+
+    /**
+     * Muro de protección biométrica previo a la apertura del módulo de generación de pases QR.
+     */
+    fun authenticateQrGenerationModule(
+        context: Context,
+        onAuthorized: () -> Unit,
+        onDenied: (String) -> Unit
+    ) {
+        authenticateCriticalAction(
+            context = context,
+            title = "Acceso Seguro al Generador de Pases QR",
+            subtitle = "Verifique su identidad (huella o rostro) antes de emitir códigos QR de acceso",
+            onAuthorized = onAuthorized,
+            onDenied = onDenied
+        )
+    }
 }

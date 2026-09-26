@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -26,7 +27,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
@@ -38,9 +40,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -66,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.auth.ResidentBiometricGate
 import com.example.data.auth.MedusaRole
 import com.example.data.booking.AppDatabase
 import com.example.ui.components.ResidentFirebaseAuthBarrier
@@ -174,7 +180,10 @@ fun ActivationScreen(
             // Campo de Entrada de Llave de Activación
             OutlinedTextField(
                 value = inputKey,
-                onValueChange = { inputKey = it.uppercase() },
+                onValueChange = { 
+                    // Limpieza automática de espacios accidentales del teclado móvil
+                    inputKey = it.replace(" ", "").uppercase() 
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("input_activation_key"),
@@ -186,6 +195,17 @@ fun ActivationScreen(
                         contentDescription = null,
                         tint = GoldPrimary
                     )
+                },
+                trailingIcon = {
+                    if (inputKey.isNotEmpty()) {
+                        IconButton(onClick = { inputKey = "" }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Limpiar campo",
+                                tint = TextMuted
+                            )
+                        }
+                    }
                 },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(
@@ -211,7 +231,46 @@ fun ActivationScreen(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Accesos directos rápidos para activar sin teclear
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SuggestionChip(
+                    onClick = {
+                        inputKey = "MEDUSA-ADM-2026"
+                        focusManager.clearFocus()
+                        activationViewModel.validateActivationKey("MEDUSA-ADM-2026")
+                    },
+                    label = { 
+                        Text("🔑 MEDUSA-ADM-2026", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = GoldPrimary) 
+                    },
+                    colors = SuggestionChipDefaults.suggestionChipColors(
+                        containerColor = NavySurface
+                    ),
+                    border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.6f)),
+                    modifier = Modifier.weight(1f)
+                )
+                SuggestionChip(
+                    onClick = {
+                        inputKey = "MEDUSA-CASETA-2026"
+                        focusManager.clearFocus()
+                        activationViewModel.validateActivationKey("MEDUSA-CASETA-2026")
+                    },
+                    label = { 
+                        Text("🛡️ MEDUSA-CASETA-2026", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyanNeon) 
+                    },
+                    colors = SuggestionChipDefaults.suggestionChipColors(
+                        containerColor = NavySurface
+                    ),
+                    border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.6f)),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Botón de Validación Oficial
             Button(
@@ -306,7 +365,57 @@ fun ActivationScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Botón de Autenticación Biométrica (Huella / Rostro)
+            Button(
+                onClick = {
+                    focusManager.clearFocus()
+                    ResidentBiometricGate.authenticateAppAccess(
+                        context = context,
+                        onAuthorized = {
+                            activationViewModel.activateViaBiometrics()
+                        },
+                        onDenied = { errorMsg ->
+                            Toast.makeText(context, "Biometría: $errorMsg", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("btn_biometric_app_access"),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CyanNeon.copy(alpha = 0.15f),
+                    contentColor = CyanNeon
+                ),
+                border = BorderStroke(1.2.dp, CyanNeon)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Fingerprint,
+                    contentDescription = "Autenticación Biométrica",
+                    modifier = Modifier.size(22.dp),
+                    tint = CyanNeon
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "ACCESO BIOMÉTRICO (HUELLA / ROSTRO)",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 12.sp,
+                        letterSpacing = 0.6.sp,
+                        color = CyanNeon
+                    )
+                    Text(
+                        text = "Desbloqueo seguro de terminal",
+                        fontSize = 10.sp,
+                        color = TextMuted
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Botón de Autenticación de Residente vía Firebase Auth
             OutlinedButton(
@@ -358,19 +467,30 @@ fun ActivationScreen(
                     ProfileAccessRow(
                         icon = Icons.Default.AdminPanelSettings,
                         role = "ADMINISTRACIÓN",
-                        desc = "Auditoría, finanzas y control maestro"
+                        desc = "Auditoría, finanzas y control maestro (MEDUSA-ADM-2026)",
+                        onClick = {
+                            inputKey = "MEDUSA-ADM-2026"
+                            activationViewModel.validateActivationKey("MEDUSA-ADM-2026")
+                        }
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     ProfileAccessRow(
                         icon = Icons.Default.Security,
                         role = "CASETA DE SEGURIDAD",
-                        desc = "Escaneo QR, barreras y bitácora táctica"
+                        desc = "Escaneo QR, barreras y bitácora táctica (MEDUSA-CASETA-2026)",
+                        onClick = {
+                            inputKey = "MEDUSA-CASETA-2026"
+                            activationViewModel.validateActivationKey("MEDUSA-CASETA-2026")
+                        }
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     ProfileAccessRow(
                         icon = Icons.Default.Home,
                         role = "PORTAL RESIDENTE",
-                        desc = "Pases de visita y reservas privadas"
+                        desc = "Pases de visita y reservas privadas (Acreditación)",
+                        onClick = {
+                            showResidentAuthBarrier = true
+                        }
                     )
                 }
             }
@@ -403,11 +523,19 @@ fun ActivationScreen(
 private fun ProfileAccessRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     role: String,
-    desc: String
+    desc: String,
+    onClick: (() -> Unit)? = null
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (onClick != null) Modifier.clickable(onClick = onClick)
+                else Modifier
+            )
+            .padding(vertical = 4.dp)
     ) {
         Icon(
             imageVector = icon,

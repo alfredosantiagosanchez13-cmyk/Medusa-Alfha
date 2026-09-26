@@ -428,7 +428,15 @@ fun PortalResidentesScreen(
                                 cachedPasses = activeCachedPasses,
                                 visitorHistory = visitorHistory,
                                 isOnline = isDeviceOnline,
-                                onOpenCreateDialog = { showCreateQrDialog = true },
+                                onOpenCreateDialog = {
+                                    ResidentBiometricGate.authenticateQrGenerationModule(
+                                        context = context,
+                                        onAuthorized = { showCreateQrDialog = true },
+                                        onDenied = { errorMsg ->
+                                            Toast.makeText(context, "Validación biométrica requerida: $errorMsg", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                },
                                 onSelectPassDetail = { selectedQrForDetail = it }
                             )
                         }
@@ -457,8 +465,16 @@ fun PortalResidentesScreen(
                                 isOnline = isDeviceOnline,
                                 onOpenBookingDialog = { showBookAmenityDialog = true },
                                 onGenerateGuestPassForBooking = { booking ->
-                                    preselectedBookingForPass = booking
-                                    showCreateQrDialog = true
+                                    ResidentBiometricGate.authenticateQrGenerationModule(
+                                        context = context,
+                                        onAuthorized = {
+                                            preselectedBookingForPass = booking
+                                            showCreateQrDialog = true
+                                        },
+                                        onDenied = { errorMsg ->
+                                            Toast.makeText(context, "Validación biométrica requerida: $errorMsg", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
                                 }
                             )
                         }
@@ -973,6 +989,29 @@ private fun ResidentQrPassesTabContent(
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Black,
                             letterSpacing = 0.5.sp
+                        )
+                    }
+
+                    // Insignia de Protección Biométrica
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Fingerprint,
+                            contentDescription = "Protegido con Biometría",
+                            tint = CyanNeon,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Acceso protegido con Biometría (Huella / Rostro)",
+                            color = CyanNeon,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }

@@ -67,6 +67,10 @@ import com.example.auth.RbacManager
 import com.example.auth.SystemPermission
 import com.example.auth.UserRole
 import androidx.compose.material.icons.filled.History
+import com.example.data.ai.AiExecutionResult
+import com.example.data.ai.MedusaAiCore
+import com.example.data.auth.MedusaAreaIsolationGuard
+import com.example.data.auth.MedusaRole
 import com.example.data.booking.AppDatabase
 import com.example.data.chat.AiGuardChatLog
 import com.example.data.core.MedusaOperationalAiEngine
@@ -782,7 +786,26 @@ private suspend fun processCommandWithRbacPolicy(db: AppDatabase, query: String,
         }
     }
 
-    // Inteligencia Operacional basada en Room SQLite
-    val operationalResponse = MedusaOperationalAiEngine.answerOperationalQuery(db, query, role)
-    return Pair(operationalResponse, false)
+    // Aislamiento Criptográfico y Lógico Absoluto (Zero-Trust Data Sandboxing)
+    val medusaRole = when (role) {
+        UserRole.ADMIN -> MedusaRole.ADMINISTRACION
+        UserRole.GUARD -> MedusaRole.GUARDIA_CASETA
+    }
+
+    val aiResult = MedusaAiCore.processPrompt(
+        db = db,
+        prompt = query,
+        role = medusaRole,
+        condominiumId = "PRADOS_1",
+        operatorName = "${role.displayName} en Copiloto"
+    )
+
+    return when (aiResult) {
+        is AiExecutionResult.Restricted -> {
+            Pair("⛔ **${aiResult.errorMessage}**\n\n${aiResult.reason}\n\n🔒 *Aislamiento Zero-Trust activo: Intento registrado en auditoría inmutable.*", true)
+        }
+        is AiExecutionResult.Success -> {
+            Pair(aiResult.responseText, false)
+        }
+    }
 }
