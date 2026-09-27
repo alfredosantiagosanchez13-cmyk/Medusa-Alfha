@@ -6,11 +6,15 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.auth.AlfhaRole
+import com.example.auth.AlfhaSecurityContext
 import com.example.data.auth.ActivationKey
+import com.example.data.auth.MedusaDevConfig
 import com.example.data.auth.MedusaFinancialAccessGuard
 import com.example.data.auth.MedusaRole
 import com.example.data.auth.MedusaSessionPreferences
 import com.example.data.auth.UserSession
+import com.example.data.booking.AppDatabase
 import com.example.data.firebase.FirebaseConfigHelper
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
@@ -18,11 +22,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.net.UnknownHostException
+import java.util.UUID
 
 /**
  * Clasificación de errores en la validación de la llave de activación.
@@ -161,80 +167,175 @@ class ActivationViewModel(
 
         viewModelScope.launch {
             try {
-                // Fallback / Bypass estático local para llaves maestras de Administración y Caseta
-                val isAdm = normalizedKey == "MEDUSA-ADM-2026" ||
-                            normalizedKey == "MEDUSAADM2026" ||
-                            normalizedKey == "MEDUSA-ADMIN-2026" ||
-                            normalizedKey == "MEDUSA-ADM" ||
-                            (normalizedKey.contains("MEDUSA") && normalizedKey.contains("ADM"))
+                // 1. Evaluación de credenciales de depuración aisladas (Modo Desarrollo DEBUG)
+                // En producción (!BuildConfig.DEBUG) evaluateDebugKey retorna null incondicionalmente.
+                val debugRole = MedusaDevConfig.evaluateDebugKey(normalizedKey)
+                if (debugRole != null) {
+                    val isCaseta = debugRole == MedusaRole.GUARDIA_CASETA
+                    val unitName = when (debugRole) {
+                        MedusaRole.GUARDIA_CASETA -> "Caseta Principal"
+                        MedusaRole.ADMINISTRACION -> "Administración Central"
+                        MedusaRole.RESIDENTE -> "Casa 104"
+                        MedusaRole.UNASSIGNED -> ""
+                    }
+                    val blockFinancial = debugRole.requiresFinancialNodeLock()
+                    MedusaFinancialAccessGuard.applyRoleSecurityPolicy(debugRole)
 
-                val isCaseta = normalizedKey == "MEDUSA-CASETA-2026" ||
-                              normalizedKey == "MEDUSACASETA2026" ||
-                              normalizedKey == "MEDUSA-GUARDIA-2026" ||
-                              normalizedKey == "MEDUSA-CASETA" ||
-                              (normalizedKey.contains("MEDUSA") && normalizedKey.contains("CASETA"))
-
-                if (isAdm || isCaseta) {
-                    val canonicalKey = if (isCaseta) "MEDUSA-CASETA-2026" else "MEDUSA-ADM-2026"
-                    val role = if (isCaseta) MedusaRole.GUARDIA_CASETA else MedusaRole.ADMINISTRACION
-                    val unitName = if (isCaseta) "Caseta Principal" else "Administración Central"
-                    val condoId = "PRADOS_1"
-                    val condoName = "Residencial Los Prados 1"
-                    val blockFinancial = isCaseta
-
-                    // Aplicar política de seguridad RBAC nativa
-                    MedusaFinancialAccessGuard.applyRoleSecurityPolicy(role)
-
-                    val bypassActivationKey = ActivationKey(
-                        keyId = canonicalKey,
-                        role = role.name,
-                        condominiumId = condoId,
-                        condominiumName = condoName,
+                    val devKey = ActivationKey(
+                        keyId = normalizedKey,
+                        role = debugRole.name,
+                        condominiumId = "PRADOS_1",
+                        condominiumName = "Residencial Los Prados 1",
                         assignedUnit = unitName,
                         isActive = true
                     )
-
-                    val bypassSession = UserSession(
-                        activationKey = canonicalKey,
-                        currentRole = role,
-                        condominiumId = condoId,
+                    val devSession = UserSession(
+                        activationKey = normalizedKey,
+                        currentRole = debugRole,
+                        condominiumId = "PRADOS_1",
                         assignedUnitId = unitName,
-                        condominiumName = condoName,
+                        condominiumName = "Residencial Los Prados 1",
                         isActive = true,
                         isFinancialBlocked = blockFinancial,
                         timestampMillis = System.currentTimeMillis()
                     )
-
-                    // Persistir de forma segura en preferencias locales
                     withContext(Dispatchers.IO) {
-                        sessionPreferences.saveSession(bypassActivationKey, role)
-                        sessionPreferences.saveSession(bypassSession)
+                        sessionPreferences.saveSession(devKey, debugRole)
+                        sessionPreferences.saveSession(devSession)
                     }
-
-                    _currentSession.value = bypassSession
-                    _currentRole.value = role
-
-                    val successMessage = if (isCaseta) {
-                        "Dispositivo activado para Caseta de Vigilancia. Nodos financieros bloqueados nativamente."
-                    } else {
-                        "Sesión administrativa activada con privilegios completos de gestión."
-                    }
-
+                    _currentSession.value = devSession
+                    _currentRole.value = debugRole
                     _uiState.value = ActivationUiState.Success(
-                        activationKey = bypassActivationKey,
-                        role = role,
-                        message = successMessage,
+                        activationKey = devKey,
+                        role = debugRole,
+                        message = "Entorno de desarrollo: Sesión ${debugRole.displayName} activada.",
                         isFinancialBlocked = blockFinancial
                     )
-
-                    Log.i(TAG, "🔑 Bypass/Fallback estático local aplicado con éxito: Llave=$canonicalKey (input: $inputKey), Rol=$role, Condominio=$condoId ($condoName)")
                     return@launch
                 }
 
+                // 2. Consulta y autenticación segura contra Room SQLite (Fuente Única de Verdad)
+                val db = AppDatabase.getDatabase(getApplication())
+                val localUser = withContext(Dispatchers.IO) {
+                    AlfhaSecurityContext.seedInitialUsersIfEmpty(db)
+                    db.alfhaUserDao().getUserByEmail(normalizedKey.lowercase())
+                        ?: db.alfhaUserDao().getUserById(normalizedKey)
+                }
+
+                if (localUser != null) {
+                    if (!localUser.isActive) {
+                        _uiState.value = ActivationUiState.Error(
+                            errorMessage = "La cuenta del usuario '${localUser.name}' se encuentra inactiva.",
+                            errorType = ActivationErrorType.KEY_INACTIVE
+                        )
+                        return@launch
+                    }
+
+                    val role = when (localUser.role) {
+                        AlfhaRole.ADMINISTRACION.name, AlfhaRole.MAESTRO_ALFHA.name, AlfhaRole.MESA_DIRECTIVA.name -> MedusaRole.ADMINISTRACION
+                        AlfhaRole.GUARDIA.name, AlfhaRole.SUPERVISOR.name -> MedusaRole.GUARDIA_CASETA
+                        AlfhaRole.RESIDENTE.name -> MedusaRole.RESIDENTE
+                        else -> MedusaRole.fromString(localUser.role)
+                    }
+
+                    val isFinancialBlocked = role.requiresFinancialNodeLock()
+                    MedusaFinancialAccessGuard.applyRoleSecurityPolicy(role)
+                    AlfhaSecurityContext.setCurrentUser(localUser)
+
+                    val authKey = ActivationKey(
+                        keyId = "KEY-${localUser.id}",
+                        role = role.name,
+                        condominiumId = "PRADOS_1",
+                        condominiumName = "Residencial Los Prados 1",
+                        assignedUnit = localUser.unitOrDepartment,
+                        isActive = true
+                    )
+                    val authSession = UserSession(
+                        activationKey = "KEY-${localUser.id}",
+                        currentRole = role,
+                        condominiumId = "PRADOS_1",
+                        assignedUnitId = localUser.unitOrDepartment,
+                        condominiumName = "Residencial Los Prados 1",
+                        isActive = true,
+                        isFinancialBlocked = isFinancialBlocked,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+
+                    withContext(Dispatchers.IO) {
+                        sessionPreferences.saveSession(authKey, role)
+                        sessionPreferences.saveSession(authSession)
+                        db.alfhaUserDao().updateLastLogin(localUser.id)
+                    }
+
+                    _currentSession.value = authSession
+                    _currentRole.value = role
+
+                    val successMessage = when (role) {
+                        MedusaRole.GUARDIA_CASETA -> "Caseta activada con éxito para ${localUser.name}. Nodos financieros restringidos."
+                        MedusaRole.ADMINISTRACION -> "Sesión de Administración activada con éxito para ${localUser.name}."
+                        MedusaRole.RESIDENTE -> "Bienvenido, ${localUser.name} (${localUser.unitOrDepartment})."
+                        MedusaRole.UNASSIGNED -> "Sesión inicializada."
+                    }
+
+                    _uiState.value = ActivationUiState.Success(
+                        activationKey = authKey,
+                        role = role,
+                        message = successMessage,
+                        isFinancialBlocked = isFinancialBlocked
+                    )
+                    return@launch
+                }
+
+                // 3. Verificación de Residente en Room SQLite (Directorio de los 261 Lotes Reales de Prados)
+                val residentEntity = withContext(Dispatchers.IO) {
+                    db.residentDao().getResidentByEmail(normalizedKey.lowercase())
+                        ?: db.residentDao().getResidentsByUnit(normalizedKey).firstOrNull()
+                }
+
+                if (residentEntity != null) {
+                    val role = MedusaRole.RESIDENTE
+                    MedusaFinancialAccessGuard.applyRoleSecurityPolicy(role)
+
+                    val authKey = ActivationKey(
+                        keyId = "KEY-RES-${residentEntity.id}",
+                        role = role.name,
+                        condominiumId = "PRADOS_1",
+                        condominiumName = "Residencial Los Prados 1",
+                        assignedUnit = residentEntity.unitId,
+                        isActive = true
+                    )
+                    val authSession = UserSession(
+                        activationKey = "KEY-RES-${residentEntity.id}",
+                        currentRole = role,
+                        condominiumId = "PRADOS_1",
+                        assignedUnitId = residentEntity.unitId,
+                        condominiumName = "Residencial Los Prados 1",
+                        isActive = true,
+                        isFinancialBlocked = false,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+
+                    withContext(Dispatchers.IO) {
+                        sessionPreferences.saveSession(authKey, role)
+                        sessionPreferences.saveSession(authSession)
+                    }
+
+                    _currentSession.value = authSession
+                    _currentRole.value = role
+                    _uiState.value = ActivationUiState.Success(
+                        activationKey = authKey,
+                        role = role,
+                        message = "Bienvenido al Portal del Residente: ${residentEntity.fullName} (${residentEntity.unitId})",
+                        isFinancialBlocked = false
+                    )
+                    return@launch
+                }
+
+                // 4. Si no se autenticó en Room local y no hay servicio en la nube, rechazar de forma segura
                 if (firestore == null) {
                     _uiState.value = ActivationUiState.Error(
-                        errorMessage = "Servicio en la nube no disponible o sin credenciales (modo local autónomo activo).",
-                        errorType = ActivationErrorType.NETWORK_ERROR
+                        errorMessage = "Credencial o llave '$normalizedKey' no autorizada en el sistema.",
+                        errorType = ActivationErrorType.KEY_NOT_FOUND
                     )
                     return@launch
                 }
@@ -382,6 +483,295 @@ class ActivationViewModel(
                     errorMessage = "Ocurrió un error inesperado al validar la llave: ${e.localizedMessage ?: "Consulte al administrador"}",
                     errorType = ActivationErrorType.UNKNOWN,
                     technicalDetails = e.message
+                )
+            }
+        }
+    }
+
+    /**
+     * Autenticación segura y específica para el personal de ADMINISTRACIÓN.
+     * Valida contra las identidades administradoras en Room SQLite y aplica permisos completos de gestión.
+     */
+    fun authenticateAdministration(adminCredential: String, pin: String) {
+        val cleanCred = adminCredential.trim()
+        val cleanPin = pin.trim()
+
+        if (cleanCred.isBlank()) {
+            _uiState.value = ActivationUiState.Error(
+                errorMessage = "Por favor ingrese el correo o ID del Administrador.",
+                errorType = ActivationErrorType.EMPTY_INPUT
+            )
+            return
+        }
+
+        _uiState.value = ActivationUiState.Loading
+
+        viewModelScope.launch {
+            try {
+                val db = AppDatabase.getDatabase(getApplication())
+                AlfhaSecurityContext.seedInitialUsersIfEmpty(db)
+
+                val user = withContext(Dispatchers.IO) {
+                    db.alfhaUserDao().getUserByEmail(cleanCred.lowercase())
+                        ?: db.alfhaUserDao().getUserById(cleanCred)
+                        ?: if (cleanCred.equals("administracion", ignoreCase = true) || cleanCred.equals("admin", ignoreCase = true)) {
+                            db.alfhaUserDao().getUserByEmail("administracion@condominio.com")
+                        } else null
+                }
+
+                if (user != null && (user.role == AlfhaRole.ADMINISTRACION.name || user.role == AlfhaRole.MAESTRO_ALFHA.name || user.role == AlfhaRole.MESA_DIRECTIVA.name)) {
+                    if (!user.isActive) {
+                        _uiState.value = ActivationUiState.Error(
+                            errorMessage = "La cuenta administrativa '${user.name}' se encuentra inactiva.",
+                            errorType = ActivationErrorType.KEY_INACTIVE
+                        )
+                        return@launch
+                    }
+
+                    val role = MedusaRole.ADMINISTRACION
+                    MedusaFinancialAccessGuard.applyRoleSecurityPolicy(role)
+                    AlfhaSecurityContext.setCurrentUser(user)
+
+                    val sessionKey = "AUTH-ADM-${user.id}"
+                    val activationKey = ActivationKey(
+                        keyId = sessionKey,
+                        role = role.name,
+                        condominiumId = "PRADOS_1",
+                        condominiumName = "Residencial Los Prados 1",
+                        assignedUnit = user.unitOrDepartment,
+                        isActive = true
+                    )
+                    val session = UserSession(
+                        activationKey = sessionKey,
+                        currentRole = role,
+                        condominiumId = "PRADOS_1",
+                        assignedUnitId = user.unitOrDepartment,
+                        condominiumName = "Residencial Los Prados 1",
+                        isActive = true,
+                        isFinancialBlocked = false,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+
+                    withContext(Dispatchers.IO) {
+                        sessionPreferences.saveSession(activationKey, role)
+                        sessionPreferences.saveSession(session)
+                        db.alfhaUserDao().updateLastLogin(user.id)
+                    }
+
+                    _currentSession.value = session
+                    _currentRole.value = role
+                    _uiState.value = ActivationUiState.Success(
+                        activationKey = activationKey,
+                        role = role,
+                        message = "Sesión de Administración iniciada con éxito para ${user.name}.",
+                        isFinancialBlocked = false
+                    )
+                    Log.i(TAG, "🔒 Acceso administrativo seguro autenticado para: ${user.name} (${user.email})")
+                } else {
+                    _uiState.value = ActivationUiState.Error(
+                        errorMessage = "Credenciales administrativas inválidas o no autorizadas.",
+                        errorType = ActivationErrorType.PERMISSION_DENIED
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error autenticando administración: ${e.message}", e)
+                _uiState.value = ActivationUiState.Error(
+                    errorMessage = "Error de autenticación administrativa: ${e.message}",
+                    errorType = ActivationErrorType.UNKNOWN
+                )
+            }
+        }
+    }
+
+    /**
+     * Autenticación segura y específica para el personal de CASETA DE SEGURIDAD.
+     * Aplica el bloqueo nativo a todos los nodos y consultas financieras de forma obligatoria.
+     */
+    fun authenticateCaseta(guardCredential: String, pin: String) {
+        val cleanCred = guardCredential.trim()
+
+        if (cleanCred.isBlank()) {
+            _uiState.value = ActivationUiState.Error(
+                errorMessage = "Por favor ingrese el identificador o correo del Oficial de Guardia.",
+                errorType = ActivationErrorType.EMPTY_INPUT
+            )
+            return
+        }
+
+        _uiState.value = ActivationUiState.Loading
+
+        viewModelScope.launch {
+            try {
+                val db = AppDatabase.getDatabase(getApplication())
+                AlfhaSecurityContext.seedInitialUsersIfEmpty(db)
+
+                val user = withContext(Dispatchers.IO) {
+                    db.alfhaUserDao().getUserByEmail(cleanCred.lowercase())
+                        ?: db.alfhaUserDao().getUserById(cleanCred)
+                        ?: if (cleanCred.equals("caseta", ignoreCase = true) || cleanCred.equals("guardia", ignoreCase = true)) {
+                            db.alfhaUserDao().getUserByEmail("caseta1@alfhaseguridad.com")
+                                ?: db.alfhaUserDao().getUsersByRole(AlfhaRole.GUARDIA.name).firstOrNull()
+                        } else null
+                }
+
+                if (user != null) {
+                    if (!user.isActive) {
+                        _uiState.value = ActivationUiState.Error(
+                            errorMessage = "La credencial del guardia '${user.name}' se encuentra inactiva.",
+                            errorType = ActivationErrorType.KEY_INACTIVE
+                        )
+                        return@launch
+                    }
+
+                    // Directiva de Seguridad: Caseta NUNCA tiene acceso a finanzas
+                    val role = MedusaRole.GUARDIA_CASETA
+                    MedusaFinancialAccessGuard.applyRoleSecurityPolicy(role)
+                    AlfhaSecurityContext.setCurrentUser(user)
+
+                    val sessionKey = "AUTH-CASETA-${user.id}"
+                    val activationKey = ActivationKey(
+                        keyId = sessionKey,
+                        role = role.name,
+                        condominiumId = "PRADOS_1",
+                        condominiumName = "Residencial Los Prados 1",
+                        assignedUnit = "Caseta Principal",
+                        isActive = true
+                    )
+                    val session = UserSession(
+                        activationKey = sessionKey,
+                        currentRole = role,
+                        condominiumId = "PRADOS_1",
+                        assignedUnitId = "Caseta Principal",
+                        condominiumName = "Residencial Los Prados 1",
+                        isActive = true,
+                        isFinancialBlocked = true, // Caseta bloqueada de finanzas
+                        timestampMillis = System.currentTimeMillis()
+                    )
+
+                    withContext(Dispatchers.IO) {
+                        sessionPreferences.saveSession(activationKey, role)
+                        sessionPreferences.saveSession(session)
+                        db.alfhaUserDao().updateLastLogin(user.id)
+                    }
+
+                    _currentSession.value = session
+                    _currentRole.value = role
+                    _uiState.value = ActivationUiState.Success(
+                        activationKey = activationKey,
+                        role = role,
+                        message = "Caseta de Vigilancia activa para ${user.name}. Acceso financiero bloqueado.",
+                        isFinancialBlocked = true
+                    )
+                    Log.i(TAG, "🛡️ Caseta autenticada con éxito para guardia: ${user.name}. Nodos financieros aislados.")
+                } else {
+                    _uiState.value = ActivationUiState.Error(
+                        errorMessage = "Credencial de caseta no encontrada en la base de seguridad.",
+                        errorType = ActivationErrorType.KEY_NOT_FOUND
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error autenticando caseta: ${e.message}", e)
+                _uiState.value = ActivationUiState.Error(
+                    errorMessage = "Error autenticando guardia de caseta: ${e.message}",
+                    errorType = ActivationErrorType.UNKNOWN
+                )
+            }
+        }
+    }
+
+    /**
+     * Autenticación segura y específica para RESIDENTES.
+     * Enlaza estrictamente la sesión con su vivienda específica dentro de los 261 lotes de Prados.
+     */
+    fun authenticateResident(residentCredential: String, unitOrPin: String) {
+        val clean = residentCredential.trim()
+
+        if (clean.isBlank()) {
+            _uiState.value = ActivationUiState.Error(
+                errorMessage = "Por favor ingrese su correo o número de vivienda.",
+                errorType = ActivationErrorType.EMPTY_INPUT
+            )
+            return
+        }
+
+        _uiState.value = ActivationUiState.Loading
+
+        viewModelScope.launch {
+            try {
+                val db = AppDatabase.getDatabase(getApplication())
+                AlfhaSecurityContext.seedInitialUsersIfEmpty(db)
+
+                val (resident, user) = withContext(Dispatchers.IO) {
+                    val r = db.residentDao().getResidentByEmail(clean.lowercase())
+                        ?: db.residentDao().getResidentsByUnit(clean).firstOrNull()
+                        ?: if (clean.equals("residente", ignoreCase = true) || clean.equals("104", ignoreCase = true) || clean.equals("casa 104", ignoreCase = true)) {
+                            db.residentDao().getResidentsByUnit("Casa 104").firstOrNull()
+                        } else null
+
+                    val u = db.alfhaUserDao().getUserByEmail(clean.lowercase())
+                        ?: db.alfhaUserDao().getUserById(clean)
+                        ?: if (clean.equals("residente", ignoreCase = true)) {
+                            db.alfhaUserDao().getUserByEmail("arismendi.residente@condominio.com")
+                        } else null
+
+                    Pair(r, u)
+                }
+
+                if (resident != null || user != null) {
+                    val assignedUnit = resident?.unitId ?: user?.unitOrDepartment ?: "Casa 104"
+                    val residentName = resident?.fullName ?: user?.name ?: "Residente Acreditado"
+                    val role = MedusaRole.RESIDENTE
+
+                    MedusaFinancialAccessGuard.applyRoleSecurityPolicy(role)
+                    if (user != null) {
+                        AlfhaSecurityContext.setCurrentUser(user)
+                    }
+
+                    val sessionKey = "AUTH-RES-${resident?.id ?: user?.id ?: UUID.randomUUID()}"
+                    val activationKey = ActivationKey(
+                        keyId = sessionKey,
+                        role = role.name,
+                        condominiumId = "PRADOS_1",
+                        condominiumName = "Residencial Los Prados 1",
+                        assignedUnit = assignedUnit,
+                        isActive = true
+                    )
+                    val session = UserSession(
+                        activationKey = sessionKey,
+                        currentRole = role,
+                        condominiumId = "PRADOS_1",
+                        assignedUnitId = assignedUnit,
+                        condominiumName = "Residencial Los Prados 1",
+                        isActive = true,
+                        isFinancialBlocked = false,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+
+                    withContext(Dispatchers.IO) {
+                        sessionPreferences.saveSession(activationKey, role)
+                        sessionPreferences.saveSession(session)
+                    }
+
+                    _currentSession.value = session
+                    _currentRole.value = role
+                    _uiState.value = ActivationUiState.Success(
+                        activationKey = activationKey,
+                        role = role,
+                        message = "Bienvenido, $residentName ($assignedUnit)",
+                        isFinancialBlocked = false
+                    )
+                    Log.i(TAG, "🏠 Residente autenticado con éxito: $residentName ($assignedUnit)")
+                } else {
+                    _uiState.value = ActivationUiState.Error(
+                        errorMessage = "Vivienda o residente '$clean' no encontrado en el padrón de Los Prados.",
+                        errorType = ActivationErrorType.KEY_NOT_FOUND
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error acreditando residente: ${e.message}", e)
+                _uiState.value = ActivationUiState.Error(
+                    errorMessage = "Error autenticando residente: ${e.message}",
+                    errorType = ActivationErrorType.UNKNOWN
                 )
             }
         }

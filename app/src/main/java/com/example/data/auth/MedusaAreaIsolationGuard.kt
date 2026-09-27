@@ -38,6 +38,14 @@ object MedusaAreaIsolationGuard {
     private const val TAG = "MedusaAreaIsolation"
     const val RESTRICTED_ACCESS_ERROR = "SEGURIDAD_MEDUSA: ACCESO RESTRINGIDO"
 
+    private fun safeLogWarn(message: String) {
+        try {
+            Log.w(TAG, message)
+        } catch (_: Throwable) {
+            println("[$TAG][WARN] $message")
+        }
+    }
+
     // Palabras clave sensibles de administración y finanzas prohibidas para Caseta y Residentes
     private val FORBIDDEN_ADMIN_FINANCIAL_KEYWORDS = listOf(
         "finanza", "finanzas", "nómina", "nomina", "ingreso", "ingresos", "egreso", "egresos",
@@ -66,8 +74,7 @@ object MedusaAreaIsolationGuard {
                 // Verificar si intenta consultar nodos o variables financieras/administrativas
                 for (kw in FORBIDDEN_ADMIN_FINANCIAL_KEYWORDS) {
                     if (cleanQuery.contains(kw)) {
-                        Log.w(
-                            TAG,
+                        safeLogWarn(
                             "⛔ [VIOLACIÓN INTERCEPTADA] Intento de acceso no autorizado a sector ADMINISTRACIÓN desde CASETA. Término: '$kw'"
                         )
                         return AreaIsolationCheckResult.Blocked(
@@ -123,6 +130,45 @@ object MedusaAreaIsolationGuard {
                     attemptedSector = AreaSector.CASETA_SEGURIDAD
                 )
             }
+        }
+    }
+
+    /**
+     * Valida de manera estricta que un residente únicamente pueda consultar o gestionar
+     * la unidad residencial/vivienda que le fue asignada en su sesión activa.
+     * Cualquier intento de consultar datos de otro lote resulta en bloqueo y error de acceso.
+     */
+    fun validateResidentLotAccess(residentAssignedUnit: String, targetLotOrUnit: String): AreaIsolationCheckResult {
+        val cleanResidentUnit = residentAssignedUnit.trim().lowercase()
+        val cleanTargetLot = targetLotOrUnit.trim().lowercase()
+
+        val normalizedResidentNum = cleanResidentUnit.filter { it.isDigit() }
+        val normalizedTargetNum = cleanTargetLot.filter { it.isDigit() }
+
+        val isSameHouse = cleanResidentUnit == cleanTargetLot ||
+                (normalizedResidentNum.isNotEmpty() && normalizedResidentNum == normalizedTargetNum)
+
+        if (!isSameHouse) {
+            safeLogWarn(
+                "⛔ [AISLAMIENTO INTER-LOTES VIOLADO] Residente de '$residentAssignedUnit' intentó consultar '$targetLotOrUnit'"
+            )
+            return AreaIsolationCheckResult.Blocked(
+                reason = "ACCESO DENEGADO: El usuario residente de $residentAssignedUnit no cuenta con autorización para consultar datos del lote $targetLotOrUnit.",
+                errorCode = "SEGURIDAD_MEDUSA: LOTE_NO_AUTORIZADO",
+                attemptedSector = AreaSector.RESIDENCIAL
+            )
+        }
+        return AreaIsolationCheckResult.Permitted
+    }
+
+    /**
+     * Aserción defensiva para acceso a lotes por parte de residentes.
+     * Lanza SecurityException si el lote consultado no coincide con el asignado.
+     */
+    fun assertResidentLotAccess(residentAssignedUnit: String, targetLotOrUnit: String) {
+        val result = validateResidentLotAccess(residentAssignedUnit, targetLotOrUnit)
+        if (result is AreaIsolationCheckResult.Blocked) {
+            throw SecurityException(result.reason)
         }
     }
 }

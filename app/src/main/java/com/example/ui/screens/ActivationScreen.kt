@@ -27,13 +27,17 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -48,6 +52,7 @@ import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -66,12 +71,17 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.BuildConfig
 import com.example.auth.ResidentBiometricGate
+import com.example.data.auth.MedusaDevConfig
 import com.example.data.auth.MedusaRole
 import com.example.data.booking.AppDatabase
 import com.example.ui.components.ResidentFirebaseAuthBarrier
@@ -105,6 +115,8 @@ fun ActivationScreen(
 
     var inputKey by remember { mutableStateOf("") }
     var showResidentAuthBarrier by remember { mutableStateOf(false) }
+    var showAdminAuthModal by remember { mutableStateOf(false) }
+    var showCasetaAuthModal by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
 
     // Escucha de éxito en la activación para propagar navegación
@@ -187,8 +199,8 @@ fun ActivationScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("input_activation_key"),
-                label = { Text("Llave de Activación (Key)", color = TextMuted) },
-                placeholder = { Text("EJ: MEDUSA-ADM-2026", color = TextMuted.copy(alpha = 0.6f)) },
+                label = { Text("Credencial, ID o Llave de Acceso", color = TextMuted) },
+                placeholder = { Text("Ej: Correo, ID o Llave Oficial", color = TextMuted.copy(alpha = 0.6f)) },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.VpnKey,
@@ -231,43 +243,45 @@ fun ActivationScreen(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Accesos directos rápidos para activar sin teclear
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SuggestionChip(
-                    onClick = {
-                        inputKey = "MEDUSA-ADM-2026"
-                        focusManager.clearFocus()
-                        activationViewModel.validateActivationKey("MEDUSA-ADM-2026")
-                    },
-                    label = { 
-                        Text("🔑 MEDUSA-ADM-2026", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = GoldPrimary) 
-                    },
-                    colors = SuggestionChipDefaults.suggestionChipColors(
-                        containerColor = NavySurface
-                    ),
-                    border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.6f)),
-                    modifier = Modifier.weight(1f)
-                )
-                SuggestionChip(
-                    onClick = {
-                        inputKey = "MEDUSA-CASETA-2026"
-                        focusManager.clearFocus()
-                        activationViewModel.validateActivationKey("MEDUSA-CASETA-2026")
-                    },
-                    label = { 
-                        Text("🛡️ MEDUSA-CASETA-2026", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyanNeon) 
-                    },
-                    colors = SuggestionChipDefaults.suggestionChipColors(
-                        containerColor = NavySurface
-                    ),
-                    border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.6f)),
-                    modifier = Modifier.weight(1f)
-                )
+            // Accesos de prueba aislados exclusivamente para compilaciones de desarrollo (DEBUG)
+            // En producción (!BuildConfig.DEBUG) este bloque no se renderiza.
+            if (BuildConfig.DEBUG) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SuggestionChip(
+                        onClick = {
+                            inputKey = "DEV-ADM-PRADOS"
+                            focusManager.clearFocus()
+                            activationViewModel.validateActivationKey("DEV-ADM-PRADOS")
+                        },
+                        label = { 
+                            Text("🛠️ DEBUG ADM", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = GoldPrimary) 
+                        },
+                        colors = SuggestionChipDefaults.suggestionChipColors(
+                            containerColor = NavySurface
+                        ),
+                        border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.4f)),
+                        modifier = Modifier.weight(1f)
+                    )
+                    SuggestionChip(
+                        onClick = {
+                            inputKey = "DEV-CASETA-PRADOS"
+                            focusManager.clearFocus()
+                            activationViewModel.validateActivationKey("DEV-CASETA-PRADOS")
+                        },
+                        label = { 
+                            Text("🛠️ DEBUG CASETA", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyanNeon) 
+                        },
+                        colors = SuggestionChipDefaults.suggestionChipColors(
+                            containerColor = NavySurface
+                        ),
+                        border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.4f)),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -467,20 +481,18 @@ fun ActivationScreen(
                     ProfileAccessRow(
                         icon = Icons.Default.AdminPanelSettings,
                         role = "ADMINISTRACIÓN",
-                        desc = "Auditoría, finanzas y control maestro (MEDUSA-ADM-2026)",
+                        desc = "Auditoría, finanzas y control maestro (Acreditación requerida)",
                         onClick = {
-                            inputKey = "MEDUSA-ADM-2026"
-                            activationViewModel.validateActivationKey("MEDUSA-ADM-2026")
+                            showAdminAuthModal = true
                         }
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     ProfileAccessRow(
                         icon = Icons.Default.Security,
                         role = "CASETA DE SEGURIDAD",
-                        desc = "Escaneo QR, barreras y bitácora táctica (MEDUSA-CASETA-2026)",
+                        desc = "Escaneo QR, barreras y bitácora táctica (Sin acceso financiero)",
                         onClick = {
-                            inputKey = "MEDUSA-CASETA-2026"
-                            activationViewModel.validateActivationKey("MEDUSA-CASETA-2026")
+                            showCasetaAuthModal = true
                         }
                     )
                     Spacer(modifier = Modifier.height(6.dp))
@@ -495,6 +507,28 @@ fun ActivationScreen(
                 }
             }
         }
+    }
+
+    // Modal de Autenticación de Administración
+    if (showAdminAuthModal) {
+        AdminAuthenticationDialog(
+            onDismiss = { showAdminAuthModal = false },
+            onAuthenticate = { adminCredential, pin ->
+                showAdminAuthModal = false
+                activationViewModel.authenticateAdministration(adminCredential, pin)
+            }
+        )
+    }
+
+    // Modal de Autenticación de Caseta de Seguridad
+    if (showCasetaAuthModal) {
+        CasetaAuthenticationDialog(
+            onDismiss = { showCasetaAuthModal = false },
+            onAuthenticate = { guardCredential, pin ->
+                showCasetaAuthModal = false
+                activationViewModel.authenticateCaseta(guardCredential, pin)
+            }
+        )
     }
 
     // Modal de Autenticación de Residente con Firebase Auth
@@ -513,6 +547,321 @@ fun ActivationScreen(
                     showResidentAuthBarrier = false
                     activationViewModel.activateAsResidentFromFirebaseAuth(resident)
                     onActivationSuccess(MedusaRole.RESIDENTE)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminAuthenticationDialog(
+    onDismiss: () -> Unit,
+    onAuthenticate: (String, String) -> Unit
+) {
+    var adminEmail by remember { mutableStateOf("administracion@condominio.com") }
+    var adminPin by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = NavyDark,
+            border = BorderStroke(1.5.dp, GoldPrimary)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(NavySurface)
+                        .border(1.dp, GoldPrimary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AdminPanelSettings,
+                        contentDescription = "Admin",
+                        tint = GoldPrimary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "ACREDITACIÓN ADMINISTRATIVA",
+                    color = GoldPrimary,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 15.sp,
+                    letterSpacing = 0.5.sp
+                )
+
+                Text(
+                    text = "Control Maestro y Auditoría General",
+                    color = TextWhite,
+                    fontSize = 11.sp
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = adminEmail,
+                    onValueChange = { adminEmail = it },
+                    label = { Text("Correo o ID Administrador", color = TextMuted) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Person, contentDescription = null, tint = GoldPrimary)
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = GoldPrimary,
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedTextColor = TextWhite,
+                        unfocusedTextColor = TextWhite,
+                        focusedContainerColor = NavySurface,
+                        unfocusedContainerColor = NavySurface
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = adminPin,
+                    onValueChange = { adminPin = it },
+                    label = { Text("PIN o Clave de Seguridad", color = TextMuted) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = GoldPrimary)
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = null,
+                                tint = TextMuted
+                            )
+                        }
+                    },
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = GoldPrimary,
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedTextColor = TextWhite,
+                        unfocusedTextColor = TextWhite,
+                        focusedContainerColor = NavySurface,
+                        unfocusedContainerColor = NavySurface
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFF475569))
+                    ) {
+                        Text("Cancelar", color = TextMuted, fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = { onAuthenticate(adminEmail, adminPin) },
+                        modifier = Modifier.weight(1.5f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = GoldPrimary,
+                            contentColor = NavyDark
+                        ),
+                        enabled = adminEmail.isNotBlank()
+                    ) {
+                        Text("Ingresar", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CasetaAuthenticationDialog(
+    onDismiss: () -> Unit,
+    onAuthenticate: (String, String) -> Unit
+) {
+    var guardId by remember { mutableStateOf("caseta1@alfhaseguridad.com") }
+    var guardPin by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = NavyDark,
+            border = BorderStroke(1.5.dp, CyanNeon)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(NavySurface)
+                        .border(1.dp, CyanNeon, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Security,
+                        contentDescription = "Caseta",
+                        tint = CyanNeon,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = "ACREDITACIÓN DE GUARDIA",
+                    color = CyanNeon,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 15.sp,
+                    letterSpacing = 0.5.sp
+                )
+
+                Text(
+                    text = "Control Táctico y Garita (Nodos Financieros Bloqueados)",
+                    color = TextWhite,
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF0F172A),
+                    border = BorderStroke(1.dp, Color(0xFF1E293B)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = CyanNeon,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Aislamiento Zero-Trust activo: Sin acceso a balances, nómina ni cuentas bancarias.",
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                OutlinedTextField(
+                    value = guardId,
+                    onValueChange = { guardId = it },
+                    label = { Text("Oficial / Correo de Caseta", color = TextMuted) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Badge, contentDescription = null, tint = CyanNeon)
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyanNeon,
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedTextColor = TextWhite,
+                        unfocusedTextColor = TextWhite,
+                        focusedContainerColor = NavySurface,
+                        unfocusedContainerColor = NavySurface
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = guardPin,
+                    onValueChange = { guardPin = it },
+                    label = { Text("PIN de Guardia en Turno", color = TextMuted) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Lock, contentDescription = null, tint = CyanNeon)
+                    },
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = null,
+                                tint = TextMuted
+                            )
+                        }
+                    },
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CyanNeon,
+                        unfocusedBorderColor = Color(0xFF334155),
+                        focusedTextColor = TextWhite,
+                        unfocusedTextColor = TextWhite,
+                        focusedContainerColor = NavySurface,
+                        unfocusedContainerColor = NavySurface
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Color(0xFF475569))
+                    ) {
+                        Text("Cancelar", color = TextMuted, fontSize = 12.sp)
+                    }
+
+                    Button(
+                        onClick = { onAuthenticate(guardId, guardPin) },
+                        modifier = Modifier.weight(1.5f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CyanNeon,
+                            contentColor = NavyDark
+                        ),
+                        enabled = guardId.isNotBlank()
+                    ) {
+                        Text("Habilitar Caseta", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
             }
         }

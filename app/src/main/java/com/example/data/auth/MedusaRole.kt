@@ -54,8 +54,8 @@ enum class MedusaRole(
             if (value.isNullOrBlank()) return UNASSIGNED
             val normalized = value.trim().uppercase()
             return when {
-                normalized == "ADMINISTRACION" || normalized == "ADMIN" || normalized == "ADMINISTRADOR" -> ADMINISTRACION
-                normalized == "GUARDIA_CASETA" || normalized == "GUARDIA" || normalized == "CASETA" || normalized == "SEGURIDAD" -> GUARDIA_CASETA
+                normalized == "ADMINISTRACION" || normalized == "ADMIN" || normalized == "ADMINISTRADOR" || normalized == "MAESTRO_ALFHA" || normalized == "MESA_DIRECTIVA" -> ADMINISTRACION
+                normalized == "GUARDIA_CASETA" || normalized == "GUARDIA" || normalized == "CASETA" || normalized == "SEGURIDAD" || normalized == "SUPERVISOR" -> GUARDIA_CASETA
                 normalized == "RESIDENTE" || normalized == "CONDOMINO" || normalized == "PROPIETARIO" -> RESIDENTE
                 normalized == "UNASSIGNED" -> UNASSIGNED
                 else -> {

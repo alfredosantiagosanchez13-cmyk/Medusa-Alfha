@@ -96,8 +96,9 @@ class MainActivity : FragmentActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 val appDb = AppDatabase.getDatabase(applicationContext)
+                com.example.auth.AlfhaSecurityContext.seedInitialUsersIfEmpty(appDb)
                 OfflineSyncEngine.initializeAutoSync(applicationContext, appDb)
-                Log.i(TAG, "🔄 OfflineSyncEngine initialized safely on Dispatchers.IO")
+                Log.i(TAG, "🔄 OfflineSyncEngine and AlfhaSecurityContext initialized safely on Dispatchers.IO")
             } catch (t: Throwable) {
                 Log.e(TAG, "Safe fallback: Failed to initialize OfflineSyncEngine: ${t.message}", t)
             }

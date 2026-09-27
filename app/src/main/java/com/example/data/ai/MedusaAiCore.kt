@@ -22,7 +22,7 @@ import java.util.UUID
  * INTERFAZ MODULAR PREPARADA PARA MODELOS FUNDACIONALES EN DISPOSITIVO (LiteRT / Gemini Nano Ready).
  *
  * Permite la evolución progresiva a modelos de inferencia local sin romper la arquitectura
- * ni alterar los bypass de validación criptográfica local ('MEDUSA-ADM-2026' y 'MEDUSA-CASETA-2026').
+ * de aislamiento defensivo ni alterar las políticas criptográficas y RBAC de la terminal.
  */
 interface MedusaFoundationAiModel {
     val modelName: String
