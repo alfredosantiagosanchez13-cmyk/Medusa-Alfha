@@ -157,6 +157,7 @@ private fun checkDeviceOnline(context: Context): Boolean {
 fun PortalResidentesScreen(
     activationViewModel: ActivationViewModel,
     modifier: Modifier = Modifier,
+    onNavigateToQrGeneratorScreen: () -> Unit = {},
     onLogoutClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -313,6 +314,17 @@ fun PortalResidentesScreen(
                     }
 
                     IconButton(
+                        onClick = onNavigateToQrGeneratorScreen,
+                        modifier = Modifier.testTag("btn_open_dedicated_qr_generator")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.QrCode2,
+                            contentDescription = "Generador de Pases QR Especializado",
+                            tint = GoldPrimary
+                        )
+                    }
+
+                    IconButton(
                         onClick = onLogoutClick,
                         modifier = Modifier.testTag("portal_residentes_logout_button")
                     ) {
@@ -428,6 +440,7 @@ fun PortalResidentesScreen(
                                 cachedPasses = activeCachedPasses,
                                 visitorHistory = visitorHistory,
                                 isOnline = isDeviceOnline,
+                                onOpenDedicatedGenerator = onNavigateToQrGeneratorScreen,
                                 onOpenCreateDialog = {
                                     ResidentBiometricGate.authenticateQrGenerationModule(
                                         context = context,
@@ -876,6 +889,7 @@ private fun ResidentQrPassesTabContent(
     cachedPasses: List<QrPassRoomEntity>,
     visitorHistory: List<VisitorPassEntity>,
     isOnline: Boolean,
+    onOpenDedicatedGenerator: () -> Unit = {},
     onOpenCreateDialog: () -> Unit,
     onSelectPassDetail: (QrPassRoomEntity) -> Unit
 ) {
@@ -968,28 +982,52 @@ private fun ResidentQrPassesTabContent(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Botón Prominente para Crear Nuevo Pase QR
+                // Botón Prominente para Crear Nuevo Pase QR y Botón de Pantalla Completa
                 item {
-                    Button(
-                        onClick = onOpenCreateDialog,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp)
-                            .testTag("btn_prominent_generate_qr"),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = GoldPrimary,
-                            contentColor = NavyDark
-                        ),
-                        shape = RoundedCornerShape(14.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.QrCode2, contentDescription = null, modifier = Modifier.size(22.dp))
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "GENERAR PASE QR TEMPORAL",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 0.5.sp
-                        )
+                        Button(
+                            onClick = onOpenCreateDialog,
+                            modifier = Modifier
+                                .weight(1.2f)
+                                .height(52.dp)
+                                .testTag("btn_prominent_generate_qr"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = GoldPrimary,
+                                contentColor = NavyDark
+                            ),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Default.QrCode2, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "NUEVO PASE QR",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = onOpenDedicatedGenerator,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .testTag("btn_open_dedicated_screen"),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = CyanNeon),
+                            border = BorderStroke(1.5.dp, CyanNeon),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "PANTALLA QR",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
 
                     // Insignia de Protección Biométrica

@@ -246,6 +246,43 @@ fun SecurityScannerScreen(
         scope.launch {
             val result = qrPassRepository.verifyPassCode(code)
             activeVerificationResult = result
+
+            // Trazabilidad inmediata y persistente en Room para todo intento denegado
+            if (result.status != PassStatus.VALID && result.status != PassStatus.VALIDADO) {
+                val pass = result.qrPass
+                val failedFolio = pass?.passCode ?: com.example.scanner.QrPayloadParser.extractEntryCode(code).ifBlank { AlphaCoreEngine.generateUniqueFolio("MED") }
+                val guest = pass?.guestName ?: "Visitante No Identificado"
+                val house = pass?.destinationHouse ?: "Sin Asignar"
+                val reason = result.failureReason ?: "Intento no autorizado (${result.status.label})"
+
+                repository.insertCheckIn(
+                    VisitorCheckIn(
+                        folio = AlphaCoreEngine.generateUniqueFolio("MED"),
+                        visitorName = guest,
+                        visitorDocument = pass?.guestDocument ?: "N/A",
+                        destinationHouse = house,
+                        passCode = failedFolio,
+                        passTypeLabel = pass?.passType?.label ?: "Visita",
+                        vehiclePlate = pass?.vehiclePlate,
+                        status = "DENEGADO",
+                        guardNotes = reason,
+                        guardName = "Guardia de Garita 1",
+                        hostResidentName = pass?.hostResidentName ?: "N/A"
+                    )
+                )
+
+                db.auditLogDao().insertAuditLog(
+                    AuditLogEntity(
+                        folio = AlphaCoreEngine.generateUniqueFolio("AUD"),
+                        operatorName = "Guardia de Garita 1",
+                        actionType = "ACCESS_ATTEMPT_DENIED",
+                        location = "Garita Principal",
+                        targetEntity = "$guest -> $house ($failedFolio)",
+                        changeDetails = "Intento de acceso denegado: $reason",
+                        resultStatus = "DENEGADO"
+                    )
+                )
+            }
         }
     }
 

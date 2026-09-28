@@ -53,6 +53,16 @@ sealed class Screen(
     )
 
     /**
+     * Generador Especializado de Pases QR para Visitas (Rol Residente).
+     * Emite códigos QR únicos y sensibles al tiempo renderizados con el motor ZXing.
+     */
+    data object ResidentVisitorQrGenerator : Screen(
+        route = "resident_visitor_qr",
+        title = "Generador de Pases QR",
+        requiredRole = MedusaRole.RESIDENTE
+    )
+
+    /**
      * Terminal Bloqueada por Intrusión: Destino forzado al detectar accesos
      * indebidos o violaciones a la jerarquía de roles RBAC.
      */
@@ -78,6 +88,7 @@ sealed class Screen(
                 route == AdminDashboard.route -> AdminDashboard
                 route == GuardDashboard.route -> GuardDashboard
                 route == ResidentPortal.route -> ResidentPortal
+                route == ResidentVisitorQrGenerator.route -> ResidentVisitorQrGenerator
                 else -> ActivationScreen
             }
         }

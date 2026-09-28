@@ -1,10 +1,12 @@
 package com.example.data.passes
 
 import com.example.data.core.AlphaCoreEngine
+import com.example.data.core.AlphaSecurityAuthority
 import com.example.data.firebase.FirestoreTenantManager
 import com.example.scanner.PassStatus
 import com.example.scanner.PassType
 import com.example.scanner.QrPassEntity
+import com.example.scanner.QrPassStatus
 import com.example.scanner.QrPayloadParser
 import com.example.scanner.VerificationResult
 import com.google.firebase.firestore.FirebaseFirestore
@@ -110,6 +112,75 @@ class QrPassRepository(
 
         var roomEntity = qrPassDao.getPassByCode(cleanCode)
 
+        // Soporte nativo para Códigos QR escaneados con payload canónico firmado
+        val parsed = QrPayloadParser.parse(code)
+        if (roomEntity == null && parsed.destinationHouse != null && !parsed.digitalSignature.isNullOrBlank()) {
+            val passFolio = parsed.passCode.ifBlank { cleanCode }
+            val residentId = parsed.residentId ?: "RES-${parsed.destinationHouse.filter { it.isDigit() }.ifBlank { "000" }}"
+            val assignedUnit = parsed.destinationHouse
+            val guestName = parsed.guestName ?: "Visitante"
+            val created = parsed.createdAtMillis ?: System.currentTimeMillis()
+            val exp = parsed.validUntilMillis ?: (created + 86400000L)
+            val passTypeStr = parsed.passType ?: PassType.VISITOR_SINGLE.name
+
+            val canonical = AlphaCoreEngine.buildCanonicalPayload(
+                folio = passFolio,
+                residentId = residentId,
+                assignedUnit = assignedUnit,
+                guestName = guestName,
+                createdAtMillis = created,
+                validUntilMillis = exp,
+                passType = passTypeStr
+            )
+
+            // 1. Verificación matemática de la firma ECDSA usando la Clave Pública de la Autoridad
+            val isSigValid = AlphaSecurityAuthority.verifyPassSignature(canonical, parsed.digitalSignature)
+            if (!isSigValid) {
+                return@withContext VerificationResult(
+                    passCode = passFolio,
+                    status = PassStatus.RECHAZADO,
+                    failureReason = "Violación de autenticidad criptográfica: Firma digital alterada o no auténtica.",
+                    condominiumId = targetCondoId
+                )
+            }
+
+            // 2. Comprobar existencia de la vivienda en el catálogo oficial de la Fuente Única de Verdad
+            val houseNum = assignedUnit.filter { it.isDigit() }.toIntOrNull()
+            val existsInCatalog = houseNum != null && com.example.data.vecinos.LosPradosCroquisData.TODOS_LOS_LOTES.any { it.numero == houseNum }
+            if (!existsInCatalog && !assignedUnit.contains("Paraíso", ignoreCase = true) && !assignedUnit.contains("General", ignoreCase = true)) {
+                return@withContext VerificationResult(
+                    passCode = passFolio,
+                    status = PassStatus.RECHAZADO,
+                    failureReason = "ACCESO DENEGADO: La vivienda '$assignedUnit' no existe en el catálogo oficial de condóminos.",
+                    condominiumId = targetCondoId
+                )
+            }
+
+            val pType = try { PassType.valueOf(passTypeStr) } catch (_: Throwable) { PassType.VISITOR_SINGLE }
+            val newPass = QrPassRoomEntity(
+                passCode = passFolio,
+                guestName = guestName,
+                guestDocument = "Verificar en Garita",
+                destinationHouse = assignedUnit,
+                hostResidentName = parsed.hostResidentName ?: "Residente Titular ($assignedUnit)",
+                vehiclePlate = parsed.vehiclePlate,
+                passType = pType,
+                validUntilMillis = exp,
+                maxEntries = if (pType == PassType.VISITOR_SINGLE) 1 else 5,
+                currentEntriesCount = 0,
+                note = "Pase QR presentado en garita y verificado criptográficamente",
+                createdAtMillis = created,
+                integrityHash = "",
+                isActive = true,
+                residentId = residentId,
+                assignedUnit = assignedUnit,
+                status = QrPassStatus.EMITIDO,
+                digitalSignature = parsed.digitalSignature
+            )
+            qrPassDao.insertPass(newPass)
+            roomEntity = newPass
+        }
+
         // Soporte nativo para Códigos QR generados por MEDUSA Vecinos Web/Apps Script
         if (roomEntity == null && cleanCode.startsWith("MEDUSA-VISITA-")) {
             val parts = cleanCode.split("-")
@@ -137,6 +208,27 @@ class QrPassRepository(
                     else -> "Condominio $condoId"
                 }
                 val destination = if (condoId == "PARAISO") "Casa $casaNum" else "Casa $casaNum · $condoName"
+                val nowTime = System.currentTimeMillis()
+                val expTime = nowTime + (24 * 3600 * 1000)
+                val canonical = AlphaCoreEngine.buildCanonicalPayload(
+                    folio = cleanCode,
+                    residentId = "RES-$casaNum",
+                    assignedUnit = destination,
+                    guestName = "Visita Autorizada #$visitaId",
+                    createdAtMillis = nowTime,
+                    validUntilMillis = expTime,
+                    passType = PassType.VISITOR_SINGLE.name
+                )
+                val adminAuthSession = com.example.data.auth.UserSession(
+                    activationKey = "AUTH-ADM-AUTOSYNC",
+                    currentRole = com.example.data.auth.MedusaRole.ADMINISTRACION,
+                    condominiumId = condoId,
+                    assignedUnitId = "ADMINISTRACION",
+                    condominiumName = condoName,
+                    isActive = true,
+                    timestampMillis = nowTime
+                )
+                val sig = AlphaSecurityAuthority.signPassPayload(canonical, adminAuthSession)
                 val newPass = QrPassRoomEntity(
                     passCode = cleanCode,
                     guestName = "Visita Autorizada #$visitaId",
@@ -145,10 +237,15 @@ class QrPassRepository(
                     hostResidentName = "Residente Casa $casaNum ($condoName)",
                     vehiclePlate = null,
                     passType = PassType.VISITOR_SINGLE,
-                    validUntilMillis = System.currentTimeMillis() + (24 * 3600 * 1000), // 24h
+                    validUntilMillis = expTime,
                     maxEntries = 1,
                     currentEntriesCount = 0,
-                    note = "Pase validado contra '$condoId' en MEDUSA ALFHA"
+                    note = "Pase validado contra '$condoId' en MEDUSA ALFHA",
+                    createdAtMillis = nowTime,
+                    residentId = "RES-$casaNum",
+                    assignedUnit = destination,
+                    status = QrPassStatus.EMITIDO,
+                    digitalSignature = sig
                 )
                 qrPassDao.insertPass(newPass)
                 roomEntity = newPass
@@ -163,11 +260,11 @@ class QrPassRepository(
             cleanCode.contains("RESIDENT", ignoreCase = true)
         )) {
             val residentFromDb = residentDao?.getResidentById(cleanCode)
-            val parsed = QrPayloadParser.parse(code)
+            val parsedRes = QrPayloadParser.parse(code)
 
             val residentName = residentFromDb?.fullName
-                ?: parsed.guestName
-                ?: parsed.hostResidentName
+                ?: parsedRes.guestName
+                ?: parsedRes.hostResidentName
                 ?: when {
                     cleanCode.contains("MENDOZA", ignoreCase = true) -> "Carlos Mendoza"
                     cleanCode.contains("RAMOS", ignoreCase = true) -> "Ing. Mariana Ramos"
@@ -180,7 +277,7 @@ class QrPassRepository(
                 }
 
             val destination = residentFromDb?.unitId
-                ?: parsed.destinationHouse
+                ?: parsedRes.destinationHouse
                 ?: when {
                     cleanCode.contains("104") -> "Casa #104 · Condominio Paraíso"
                     cleanCode.contains("201") -> "Casa #201 · Los Prados 1"
@@ -189,13 +286,35 @@ class QrPassRepository(
                     else -> if (targetCondoId != null) "Unidad Autorizada · $targetCondoId" else "Condominio Paraíso"
                 }
 
-            val plate = parsed.vehiclePlate
+            val plate = parsedRes.vehiclePlate
                 ?: when {
                     cleanCode.contains("104") -> "JHL-9821"
                     cleanCode.contains("201") -> "MXL-4091"
                     cleanCode.contains("14") -> "PQR-1102"
                     else -> "AUT-2026"
                 }
+
+            val nowTime = System.currentTimeMillis()
+            val expTime = nowTime + (365L * 24 * 3600 * 1000)
+            val canonical = AlphaCoreEngine.buildCanonicalPayload(
+                folio = cleanCode,
+                residentId = "RES-${destination.filter { it.isDigit() }.ifBlank { "000" }}",
+                assignedUnit = destination,
+                guestName = residentName,
+                createdAtMillis = nowTime,
+                validUntilMillis = expTime,
+                passType = PassType.RESIDENT_PERMANENT.name
+            )
+            val adminAuthSession = com.example.data.auth.UserSession(
+                activationKey = "AUTH-ADM-RESIDENT",
+                currentRole = com.example.data.auth.MedusaRole.ADMINISTRACION,
+                condominiumId = targetCondoId ?: "GENERAL",
+                assignedUnitId = "ADMINISTRACION",
+                condominiumName = "Residencial",
+                isActive = true,
+                timestampMillis = nowTime
+            )
+            val sig = AlphaSecurityAuthority.signPassPayload(canonical, adminAuthSession)
 
             val newResidentPass = QrPassRoomEntity(
                 passCode = cleanCode,
@@ -205,10 +324,15 @@ class QrPassRepository(
                 hostResidentName = residentName,
                 vehiclePlate = plate,
                 passType = PassType.RESIDENT_PERMANENT,
-                validUntilMillis = System.currentTimeMillis() + (365L * 24 * 3600 * 1000), // 1 año de vigencia
+                validUntilMillis = expTime,
                 maxEntries = 99999,
                 currentEntriesCount = 0,
-                note = "Pase Touchless Residente verificado con CameraX y ZXing"
+                note = "Pase Touchless Residente verificado con CameraX y ZXing",
+                createdAtMillis = nowTime,
+                residentId = "RES-${destination.filter { it.isDigit() }.ifBlank { "000" }}",
+                assignedUnit = destination,
+                status = QrPassStatus.EMITIDO,
+                digitalSignature = sig
             )
             qrPassDao.insertPass(newResidentPass)
             roomEntity = newResidentPass
@@ -217,7 +341,7 @@ class QrPassRepository(
         if (roomEntity == null) {
             return@withContext VerificationResult(
                 passCode = cleanCode,
-                status = PassStatus.INVALID,
+                status = PassStatus.RECHAZADO,
                 failureReason = "Código QR no registrado en el condominio activo (${targetCondoId ?: "GENERAL"}).",
                 condominiumId = targetCondoId,
                 isFirestoreValidated = firestore != null
@@ -241,7 +365,7 @@ class QrPassRepository(
             if (isMismatched) {
                 return@withContext VerificationResult(
                     passCode = cleanCode,
-                    status = PassStatus.INVALID,
+                    status = PassStatus.RECHAZADO,
                     failureReason = "ACCESO DENEGADO: El pase fue emitido para otra sección/condominio (${roomEntity.destinationHouse}). No válido para $targetCondoId.",
                     condominiumId = targetCondoId,
                     isFirestoreValidated = firestore != null
@@ -249,29 +373,92 @@ class QrPassRepository(
             }
         }
 
-        // Integrity validation
-        val expectedHash = AlphaCoreEngine.computeIntegrityHash(
-            roomEntity.passCode,
-            roomEntity.guestDocument,
-            roomEntity.destinationHouse
+        // 1. AUTENTICIDAD CRIPTOGRÁFICA ASIMÉTRICA (FIRMA DIGITAL ECDSA)
+        // La Caseta verifica con la Clave Pública de la Autoridad. No puede ser falsificada
+        // aunque un tercero altere folio, vivienda, visitante, expiración o tipo de acceso.
+        val canonicalPayload = AlphaCoreEngine.buildCanonicalPayload(
+            folio = roomEntity.passCode,
+            residentId = roomEntity.residentId,
+            assignedUnit = roomEntity.assignedUnit,
+            guestName = roomEntity.guestName,
+            createdAtMillis = roomEntity.createdAtMillis,
+            validUntilMillis = roomEntity.validUntilMillis,
+            passType = roomEntity.passType.name
         )
-        if (roomEntity.integrityHash.isNotEmpty() && roomEntity.integrityHash != expectedHash) {
+
+        // 1. AUTENTICIDAD CRIPTOGRÁFICA ASIMÉTRICA MANDATORIA (FIRMA DIGITAL ECDSA)
+        // La Caseta verifica con la Clave Pública de la Autoridad.
+        // Si no cuenta con firma o está alterada, el pase es rechazado de inmediato.
+        if (roomEntity.digitalSignature.isBlank()) {
+            qrPassDao.markPassAsRejected(roomEntity.passCode)
             return@withContext VerificationResult(
                 passCode = cleanCode,
-                status = PassStatus.INVALID,
-                failureReason = "Violación de integridad: El pase QR ha sido alterado o manipulado.",
+                status = PassStatus.RECHAZADO,
+                qrPass = roomEntity.toQrPassEntity().copy(status = QrPassStatus.RECHAZADO),
+                failureReason = "Violación de autenticidad criptográfica: El pase no cuenta con firma digital autorizada.",
                 condominiumId = targetCondoId,
                 isFirestoreValidated = firestore != null
             )
         }
 
-        val qrPass = roomEntity.toQrPassEntity()
-
-        if (System.currentTimeMillis() > roomEntity.validUntilMillis) {
+        val isAuthentic = AlphaSecurityAuthority.verifyPassSignature(canonicalPayload, roomEntity.digitalSignature)
+        if (!isAuthentic) {
+            qrPassDao.markPassAsRejected(roomEntity.passCode)
             return@withContext VerificationResult(
                 passCode = cleanCode,
-                status = PassStatus.EXPIRED,
-                qrPass = qrPass,
+                status = PassStatus.RECHAZADO,
+                qrPass = roomEntity.toQrPassEntity().copy(status = QrPassStatus.RECHAZADO),
+                failureReason = "Violación de autenticidad criptográfica: Firma digital alterada o no auténtica.",
+                condominiumId = targetCondoId,
+                isFirestoreValidated = firestore != null
+            )
+        }
+
+        // 2. VINCULACIÓN CON LA VIVIENDA Y FUENTE ÚNICA DE VERDAD (CROQUIS OFICIAL)
+        val houseNum = roomEntity.assignedUnit.filter { it.isDigit() }.toIntOrNull()
+        val existsInCatalog = houseNum != null && com.example.data.vecinos.LosPradosCroquisData.TODOS_LOS_LOTES.any { it.numero == houseNum }
+        if (!existsInCatalog && !roomEntity.assignedUnit.contains("Paraíso", ignoreCase = true) && !roomEntity.assignedUnit.contains("General", ignoreCase = true)) {
+            qrPassDao.markPassAsRejected(roomEntity.passCode)
+            return@withContext VerificationResult(
+                passCode = cleanCode,
+                status = PassStatus.RECHAZADO,
+                qrPass = roomEntity.toQrPassEntity().copy(status = QrPassStatus.RECHAZADO),
+                failureReason = "ACCESO DENEGADO: La vivienda '${roomEntity.assignedUnit}' no existe en el catálogo oficial de condóminos.",
+                condominiumId = targetCondoId,
+                isFirestoreValidated = firestore != null
+            )
+        }
+
+        // 2. CICLO DE VIDA DE ESTADOS (EMITIDO -> VALIDADO -> USADO | EXPIRADO | CANCELADO | RECHAZADO)
+        if (roomEntity.status == QrPassStatus.CANCELADO) {
+            return@withContext VerificationResult(
+                passCode = cleanCode,
+                status = PassStatus.CANCELADO,
+                qrPass = roomEntity.toQrPassEntity(),
+                failureReason = "El pase fue cancelado previamente por el residente titular.",
+                condominiumId = targetCondoId,
+                isFirestoreValidated = firestore != null
+            )
+        }
+
+        if (roomEntity.status == QrPassStatus.RECHAZADO) {
+            return@withContext VerificationResult(
+                passCode = cleanCode,
+                status = PassStatus.RECHAZADO,
+                qrPass = roomEntity.toQrPassEntity(),
+                failureReason = "Pase marcado como rechazado por seguridad.",
+                condominiumId = targetCondoId,
+                isFirestoreValidated = firestore != null
+            )
+        }
+
+        if (roomEntity.status == QrPassStatus.EXPIRADO || System.currentTimeMillis() > roomEntity.validUntilMillis) {
+            qrPassDao.markPassAsExpired(roomEntity.passCode)
+            val updated = roomEntity.copy(status = QrPassStatus.EXPIRADO, isActive = false)
+            return@withContext VerificationResult(
+                passCode = cleanCode,
+                status = PassStatus.EXPIRADO,
+                qrPass = updated.toQrPassEntity(),
                 failureReason = "El pase expiró el ${SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(roomEntity.validUntilMillis))}.",
                 condominiumId = targetCondoId,
                 isFirestoreValidated = firestore != null,
@@ -280,12 +467,14 @@ class QrPassRepository(
             )
         }
 
-        if (roomEntity.currentEntriesCount >= roomEntity.maxEntries) {
+        if (roomEntity.status == QrPassStatus.USADO || roomEntity.currentEntriesCount >= roomEntity.maxEntries) {
+            qrPassDao.updatePassStatus(roomEntity.passCode, QrPassStatus.USADO)
+            val updated = roomEntity.copy(status = QrPassStatus.USADO, isActive = false)
             return@withContext VerificationResult(
                 passCode = cleanCode,
-                status = PassStatus.ALREADY_USED,
-                qrPass = qrPass,
-                failureReason = "Este pase único ya alcanzó su límite (${roomEntity.currentEntriesCount}/${roomEntity.maxEntries} usos).",
+                status = PassStatus.USADO,
+                qrPass = updated.toQrPassEntity(),
+                failureReason = "Este pase único ya fue utilizado previamente (${roomEntity.currentEntriesCount}/${roomEntity.maxEntries} entradas).",
                 condominiumId = targetCondoId,
                 isFirestoreValidated = firestore != null,
                 hostResidentPhone = hostResidentPhone,
@@ -293,10 +482,14 @@ class QrPassRepository(
             )
         }
 
+        // Transición táctica: Al escanear y validar en caseta, el pase pasa a estado VALIDADO
+        qrPassDao.markPassAsValidated(roomEntity.passCode)
+        val validatedEntity = roomEntity.copy(status = QrPassStatus.VALIDADO)
+
         VerificationResult(
             passCode = cleanCode,
-            status = PassStatus.VALID,
-            qrPass = qrPass,
+            status = PassStatus.VALIDADO,
+            qrPass = validatedEntity.toQrPassEntity(),
             condominiumId = targetCondoId,
             isFirestoreValidated = firestore != null,
             hostResidentPhone = hostResidentPhone,
@@ -305,13 +498,91 @@ class QrPassRepository(
     }
 
     suspend fun markPassAsUsed(passCode: String) = withContext(Dispatchers.IO) {
-        qrPassDao.incrementUsage(passCode)
+        val cleanCode = QrPayloadParser.extractEntryCode(passCode)
+        val entity = qrPassDao.getPassByCode(cleanCode)
+        if (entity != null) {
+            val newCount = entity.currentEntriesCount + 1
+            val isNowExhausted = newCount >= entity.maxEntries
+            val updated = entity.copy(
+                currentEntriesCount = newCount,
+                status = if (isNowExhausted) QrPassStatus.USADO else QrPassStatus.VALIDADO,
+                isActive = !isNowExhausted
+            )
+            qrPassDao.updatePass(updated)
+        } else {
+            qrPassDao.incrementUsage(cleanCode)
+        }
     }
 
     suspend fun seedInitialPassesIfEmpty() = withContext(Dispatchers.IO) {
         if (qrPassDao.getPassCount() == 0) {
+            val now = System.currentTimeMillis()
+            val adminAuthSession = com.example.data.auth.UserSession(
+                activationKey = "AUTH-ADM-001",
+                currentRole = com.example.data.auth.MedusaRole.ADMINISTRACION,
+                condominiumId = "PRADOS_1",
+                assignedUnitId = "ADMINISTRACION",
+                condominiumName = "Residencial Los Prados",
+                isActive = true,
+                timestampMillis = now
+            )
+
+            fun makeSignedPass(
+                passCode: String,
+                guestName: String,
+                guestDocument: String,
+                destinationHouse: String,
+                hostResidentName: String,
+                vehiclePlate: String?,
+                passType: PassType,
+                validUntilMillis: Long,
+                maxEntries: Int = 1,
+                currentEntriesCount: Int = 0,
+                note: String,
+                status: QrPassStatus = QrPassStatus.EMITIDO
+            ): QrPassRoomEntity {
+                val residentId = "RES-${destinationHouse.filter { it.isDigit() }.ifBlank { "000" }}"
+                val canonical = AlphaCoreEngine.buildCanonicalPayload(
+                    folio = passCode,
+                    residentId = residentId,
+                    assignedUnit = destinationHouse,
+                    guestName = guestName,
+                    createdAtMillis = now,
+                    validUntilMillis = validUntilMillis,
+                    passType = passType.name
+                )
+                val sig = AlphaSecurityAuthority.signPassPayload(canonical, adminAuthSession)
+                val isExpired = status == QrPassStatus.EXPIRADO || validUntilMillis < now
+                val isExhausted = currentEntriesCount >= maxEntries
+                val finalStatus = when {
+                    status == QrPassStatus.EXPIRADO || isExpired -> QrPassStatus.EXPIRADO
+                    status == QrPassStatus.USADO || isExhausted -> QrPassStatus.USADO
+                    else -> status
+                }
+                return QrPassRoomEntity(
+                    passCode = passCode,
+                    guestName = guestName,
+                    guestDocument = guestDocument,
+                    destinationHouse = destinationHouse,
+                    hostResidentName = hostResidentName,
+                    vehiclePlate = vehiclePlate,
+                    passType = passType,
+                    validUntilMillis = validUntilMillis,
+                    maxEntries = maxEntries,
+                    currentEntriesCount = currentEntriesCount,
+                    note = note,
+                    createdAtMillis = now,
+                    integrityHash = "",
+                    isActive = finalStatus == QrPassStatus.EMITIDO,
+                    residentId = residentId,
+                    assignedUnit = destinationHouse,
+                    status = finalStatus,
+                    digitalSignature = sig
+                )
+            }
+
             val initial = listOf(
-                QrPassRoomEntity(
+                makeSignedPass(
                     passCode = "MED-20260821-0101",
                     guestName = "Valeria Sofia Mendoza",
                     guestDocument = "18.492.301-2",
@@ -319,38 +590,41 @@ class QrPassRepository(
                     hostResidentName = "Carlos Mendoza",
                     vehiclePlate = "KXYZ-98",
                     passType = PassType.VISITOR_SINGLE,
-                    validUntilMillis = System.currentTimeMillis() + (8 * 3600 * 1000),
+                    validUntilMillis = now + (8 * 3600 * 1000),
                     maxEntries = 1,
                     currentEntriesCount = 0,
-                    note = "Cena familiar / Ingreso por Portón Principal"
+                    note = "Cena familiar / Ingreso por Portón Principal",
+                    status = QrPassStatus.EMITIDO
                 ),
-                QrPassRoomEntity(
+                makeSignedPass(
                     passCode = "MED-20260821-0102",
                     guestName = "Marcos Esteban Rios (Uber Eats)",
                     guestDocument = "16.123.890-K",
-                    destinationHouse = "Casa #208",
+                    destinationHouse = "Casa #50",
                     hostResidentName = "Ana Maria Gomez",
                     vehiclePlate = "DLPR-44",
                     passType = PassType.DELIVERY_SERVICE,
-                    validUntilMillis = System.currentTimeMillis() + (2 * 3600 * 1000),
+                    validUntilMillis = now + (2 * 3600 * 1000),
                     maxEntries = 1,
                     currentEntriesCount = 0,
-                    note = "Entrega de comida a domicilio"
+                    note = "Entrega de comida a domicilio",
+                    status = QrPassStatus.EMITIDO
                 ),
-                QrPassRoomEntity(
+                makeSignedPass(
                     passCode = "MED-20260821-0103",
                     guestName = "Camila Andrea Silva",
                     guestDocument = "19.876.543-1",
-                    destinationHouse = "Casa #302",
+                    destinationHouse = "Casa #76",
                     hostResidentName = "Felipe Silva",
                     vehiclePlate = null,
                     passType = PassType.EVENT_GUEST,
-                    validUntilMillis = System.currentTimeMillis() - (3600 * 1000), // Expirado
+                    validUntilMillis = now - (3600 * 1000), // Expirado
                     maxEntries = 1,
                     currentEntriesCount = 0,
-                    note = "Invitada Cumpleaños VIP en Club House"
+                    note = "Invitada Cumpleaños VIP en Club House",
+                    status = QrPassStatus.EXPIRADO
                 ),
-                QrPassRoomEntity(
+                makeSignedPass(
                     passCode = "MED-20260821-0104",
                     guestName = "Gonzalo Inostroza",
                     guestDocument = "15.990.112-9",
@@ -358,12 +632,13 @@ class QrPassRepository(
                     hostResidentName = "Patricia Soto",
                     vehiclePlate = "BCDF-12",
                     passType = PassType.VISITOR_SINGLE,
-                    validUntilMillis = System.currentTimeMillis() + (12 * 3600 * 1000),
+                    validUntilMillis = now + (12 * 3600 * 1000),
                     maxEntries = 1,
                     currentEntriesCount = 1, // Ya usado
-                    note = "Reparación técnica de Fibra Óptica"
+                    note = "Reparación técnica de Fibra Óptica",
+                    status = QrPassStatus.USADO
                 ),
-                QrPassRoomEntity(
+                makeSignedPass(
                     passCode = "MED-20260821-0105",
                     guestName = "Dra. Romina Alarcón",
                     guestDocument = "14.331.002-3",
@@ -371,12 +646,13 @@ class QrPassRepository(
                     hostResidentName = "Directiva Condominio",
                     vehiclePlate = "PORS-99",
                     passType = PassType.RESIDENT_PERMANENT,
-                    validUntilMillis = System.currentTimeMillis() + (30L * 86400 * 1000),
+                    validUntilMillis = now + (30L * 86400 * 1000),
                     maxEntries = 999,
                     currentEntriesCount = 4,
-                    note = "Pase Frecuente Médico Residentes"
+                    note = "Pase Frecuente Médico Residentes",
+                    status = QrPassStatus.EMITIDO
                 ),
-                QrPassRoomEntity(
+                makeSignedPass(
                     passCode = "RES-TOUCHLESS-104",
                     guestName = "Carlos Mendoza",
                     guestDocument = "RES-DOC-104",
@@ -384,12 +660,13 @@ class QrPassRepository(
                     hostResidentName = "Carlos Mendoza",
                     vehiclePlate = "JHL-9821",
                     passType = PassType.RESIDENT_PERMANENT,
-                    validUntilMillis = System.currentTimeMillis() + (365L * 86400 * 1000),
+                    validUntilMillis = now + (365L * 86400 * 1000),
                     maxEntries = 99999,
                     currentEntriesCount = 0,
-                    note = "Acceso Touchless Permanente Residente Titular"
+                    note = "Acceso Touchless Permanente Residente Titular",
+                    status = QrPassStatus.EMITIDO
                 ),
-                QrPassRoomEntity(
+                makeSignedPass(
                     passCode = "RES-TOUCHLESS-201",
                     guestName = "Ing. Mariana Ramos",
                     guestDocument = "RES-DOC-201",
@@ -397,12 +674,13 @@ class QrPassRepository(
                     hostResidentName = "Ing. Mariana Ramos",
                     vehiclePlate = "MXL-4091",
                     passType = PassType.RESIDENT_PERMANENT,
-                    validUntilMillis = System.currentTimeMillis() + (365L * 86400 * 1000),
+                    validUntilMillis = now + (365L * 86400 * 1000),
                     maxEntries = 99999,
                     currentEntriesCount = 0,
-                    note = "Acceso Touchless Vehicular Residente Titular"
+                    note = "Acceso Touchless Vehicular Residente Titular",
+                    status = QrPassStatus.EMITIDO
                 ),
-                QrPassRoomEntity(
+                makeSignedPass(
                     passCode = "MEDUSA-RESIDENT-PARAISO-14",
                     guestName = "Lic. Roberto Durán",
                     guestDocument = "RES-DOC-014",
@@ -410,10 +688,11 @@ class QrPassRepository(
                     hostResidentName = "Lic. Roberto Durán",
                     vehiclePlate = "PQR-1102",
                     passType = PassType.RESIDENT_PERMANENT,
-                    validUntilMillis = System.currentTimeMillis() + (365L * 86400 * 1000),
+                    validUntilMillis = now + (365L * 86400 * 1000),
                     maxEntries = 99999,
                     currentEntriesCount = 0,
-                    note = "Credencial Touchless Peatonal y Vehicular"
+                    note = "Credencial Touchless Peatonal y Vehicular",
+                    status = QrPassStatus.EMITIDO
                 )
             )
             qrPassDao.insertPasses(initial)
@@ -433,6 +712,11 @@ fun QrPassRoomEntity.toQrPassEntity(): QrPassEntity {
         validUntilMillis = validUntilMillis,
         maxEntries = maxEntries,
         currentEntriesCount = currentEntriesCount,
-        note = note
+        note = note,
+        residentId = residentId,
+        assignedUnit = assignedUnit,
+        createdAtMillis = createdAtMillis,
+        status = status,
+        digitalSignature = digitalSignature
     )
 }

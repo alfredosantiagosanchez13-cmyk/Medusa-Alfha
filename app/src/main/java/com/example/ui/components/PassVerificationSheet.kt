@@ -71,10 +71,12 @@ fun PassVerificationSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val (statusTitle, statusColor, statusIcon) = when (result.status) {
-        PassStatus.VALID -> Triple("PASE VÁLIDO - ACCESO PERMITIDO", SuccessGreen, Icons.Default.CheckCircle)
-        PassStatus.EXPIRED -> Triple("PASE EXPIRADO", WarningOrange, Icons.Default.Warning)
-        PassStatus.ALREADY_USED -> Triple("PASE YA UTILIZADO", WarningOrange, Icons.Default.Info)
-        PassStatus.INVALID -> Triple("PASE INVÁLIDO O INEXISTENTE", ErrorRed, Icons.Default.Cancel)
+        PassStatus.VALID, PassStatus.VALIDADO -> Triple("PASE VALIDADO - ACCESO PERMITIDO", SuccessGreen, Icons.Default.CheckCircle)
+        PassStatus.EMITIDO -> Triple("PASE EMITIDO - PENDIENTE DE VALIDACIÓN", CyanNeon, Icons.Default.Info)
+        PassStatus.EXPIRED, PassStatus.EXPIRADO -> Triple("PASE EXPIRADO", WarningOrange, Icons.Default.Warning)
+        PassStatus.ALREADY_USED, PassStatus.USADO -> Triple("PASE YA UTILIZADO (USADO)", WarningOrange, Icons.Default.Info)
+        PassStatus.CANCELADO -> Triple("PASE CANCELADO POR RESIDENTE", WarningOrange, Icons.Default.Cancel)
+        PassStatus.INVALID, PassStatus.RECHAZADO -> Triple("PASE RECHAZADO / INVÁLIDO", ErrorRed, Icons.Default.Cancel)
     }
 
     ModalBottomSheet(
@@ -254,7 +256,7 @@ fun PassVerificationSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (result.status == PassStatus.VALID) {
+                if (result.status == PassStatus.VALID || result.status == PassStatus.VALIDADO) {
                     OutlinedButton(
                         onClick = onDenyEntry,
                         modifier = Modifier

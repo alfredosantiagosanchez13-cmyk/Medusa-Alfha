@@ -29,6 +29,7 @@ import com.example.data.core.AlphaCoreEngine
 import com.example.ui.screens.ActivationScreen
 import com.example.ui.screens.MasterPanelAlphaScreen
 import com.example.ui.screens.PortalResidentesScreen
+import com.example.ui.screens.ResidentVisitorQrGeneratorScreen
 import com.example.ui.screens.SecurityLockScreen
 import com.example.ui.screens.SecurityScannerScreen
 import com.example.ui.viewmodel.ActivationViewModel
@@ -209,12 +210,37 @@ fun MedusaNavGraph(
             ) {
                 PortalResidentesScreen(
                     activationViewModel = activationViewModel,
+                    onNavigateToQrGeneratorScreen = {
+                        navController.navigate(Screen.ResidentVisitorQrGenerator.route)
+                    },
                     onLogoutClick = {
                         activationViewModel.logout()
                         navController.navigate(Screen.ActivationScreen.route) {
                             popUpTo(0) { inclusive = true }
                             launchSingleTop = true
                         }
+                    }
+                )
+            }
+        }
+
+        // =========================================================================
+        // 4.1 GENERADOR ESPECIALIZADO DE PASES QR TEMPORALES (ROL RESIDENTE)
+        // =========================================================================
+        composable(route = Screen.ResidentVisitorQrGenerator.route) {
+            RbacDefensiveGuard(
+                targetScreen = Screen.ResidentVisitorQrGenerator,
+                currentSession = session,
+                activationViewModel = activationViewModel,
+                navController = navController
+            ) {
+                val assignedUnit = session?.assignedUnitId?.ifBlank { "Casa 104" } ?: "Casa 104"
+                val condoName = session?.condominiumName?.ifBlank { "Residencial Los Prados" } ?: "Residencial Los Prados"
+                ResidentVisitorQrGeneratorScreen(
+                    assignedUnit = assignedUnit,
+                    condominiumName = condoName,
+                    onNavigateBack = {
+                        navController.popBackStack()
                     }
                 )
             }

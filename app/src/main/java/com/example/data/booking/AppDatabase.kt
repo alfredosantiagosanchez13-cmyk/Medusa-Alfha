@@ -76,7 +76,7 @@ import com.example.data.visitor.VisitorPassEntity
         SyncQueueEntity::class,
         FieldValidationTestEntity::class
     ],
-    version = 23,
+    version = 24,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

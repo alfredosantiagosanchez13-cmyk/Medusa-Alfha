@@ -46,7 +46,9 @@ data class TemporaryAccessPass(
     val isActive: Boolean = true,
     val firestoreDocumentPath: String,
     val savedToFirestore: Boolean = false,
-    val syncMessage: String = ""
+    val syncMessage: String = "",
+    val residentId: String = "RES-${destinationUnit.filter { it.isDigit() }.ifBlank { "000" }}",
+    val digitalSignature: String = ""
 ) {
     val isExpired: Boolean
         get() = System.currentTimeMillis() > validUntilMillis
@@ -83,7 +85,7 @@ data class TemporaryAccessPass(
      * Payload JSON estructurado compatible con los escáneres de seguridad y caseta.
      */
     val qrPayloadJson: String
-        get() = """{"passCode":"$passCode","folio":"$folio","visitor":"$visitorName","unit":"$destinationUnit","host":"$hostResidentName","validUntil":$validUntilMillis,"maxEntries":$maxEntries,"hash":"$integrityHash"}"""
+        get() = """{"passCode":"$passCode","folio":"$folio","visitor":"$visitorName","unit":"$destinationUnit","host":"$hostResidentName","validUntil":$validUntilMillis,"maxEntries":$maxEntries,"hash":"$integrityHash","sig":"$digitalSignature"}"""
 }
 
 /**
@@ -128,6 +130,28 @@ object ResidentQrCodeUtility {
         val cleanPlate = vehiclePlate?.trim()?.takeIf { it.isNotBlank() }
         val cleanNotes = notes?.trim()?.takeIf { it.isNotBlank() }
 
+        val residentId = residentUid ?: "RES-${cleanUnit.filter { it.isDigit() }.ifBlank { "000" }}"
+        val canonicalPayload = AlphaCoreEngine.buildCanonicalPayload(
+            folio = passCode,
+            residentId = residentId,
+            assignedUnit = cleanUnit,
+            guestName = cleanVisitor,
+            createdAtMillis = now,
+            validUntilMillis = validUntilMillis,
+            passType = passType.name
+        )
+        val activeSession = com.example.data.auth.MedusaSessionPreferences.getInstance(context).getUserSession()
+            ?: com.example.data.auth.UserSession(
+                activationKey = "AUTH-RES-${cleanUnit.filter { it.isDigit() }}",
+                currentRole = com.example.data.auth.MedusaRole.RESIDENTE,
+                condominiumId = condominiumId,
+                assignedUnitId = cleanUnit,
+                condominiumName = "Condominio $condominiumId",
+                isActive = true,
+                timestampMillis = now
+            )
+        val digitalSignature = com.example.data.core.AlphaSecurityAuthority.signPassPayload(canonicalPayload, activeSession)
+
         val integrityHash = AlphaCoreEngine.computeIntegrityHash(passCode, cleanDoc, cleanUnit)
         val firestorePath = "/condominiums/$condominiumId/qr_passes/$passCode"
 
@@ -146,7 +170,11 @@ object ResidentQrCodeUtility {
             note = "Acceso Temporal (${durationHours}h). ${cleanNotes ?: ""}".trim(),
             createdAtMillis = now,
             integrityHash = integrityHash,
-            isActive = true
+            isActive = true,
+            residentId = residentId,
+            assignedUnit = cleanUnit,
+            status = com.example.scanner.QrPassStatus.EMITIDO,
+            digitalSignature = digitalSignature
         )
         db.qrPassDao().insertPass(roomEntity)
 
@@ -222,7 +250,9 @@ object ResidentQrCodeUtility {
             isActive = true,
             firestoreDocumentPath = firestorePath,
             savedToFirestore = savedToFirestore,
-            syncMessage = syncMessage
+            syncMessage = syncMessage,
+            residentId = residentId,
+            digitalSignature = digitalSignature
         )
     }
 

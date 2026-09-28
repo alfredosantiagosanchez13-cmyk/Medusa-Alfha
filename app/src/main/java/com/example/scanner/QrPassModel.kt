@@ -4,11 +4,46 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-enum class PassStatus {
-    VALID,
-    EXPIRED,
-    ALREADY_USED,
-    INVALID
+/**
+ * ESTADOS OFICIALES Y PERSISTENTES DEL PASE QR MEDUSA ALFHA:
+ * EMITIDO   → Creado por el residente, pendiente de presentación en caseta.
+ * VALIDADO  → Escaneado y validado positivamente por Caseta con firma ECDSA auténtica.
+ * USADO     → Ingreso confirmado por el guardia de garita (barrera abierta). Agotado para entrada única.
+ * EXPIRADO  → Superó la ventana de vigencia temporal autorizada.
+ * CANCELADO → Revocado preventivamente por el residente titular.
+ * RECHAZADO → Intento de ingreso no autorizado (firma alterada, vivienda no autorizada o manipulado).
+ */
+enum class QrPassStatus(val label: String) {
+    EMITIDO("Emitido / Pendiente"),
+    VALIDADO("Validado en Garita"),
+    USADO("Ingreso Completado"),
+    EXPIRADO("Vigencia Expirada"),
+    CANCELADO("Cancelado por Residente"),
+    RECHAZADO("Rechazado por Seguridad");
+
+    fun toPassStatus(): PassStatus = when (this) {
+        EMITIDO -> PassStatus.EMITIDO
+        VALIDADO -> PassStatus.VALIDADO
+        USADO -> PassStatus.USADO
+        EXPIRADO -> PassStatus.EXPIRADO
+        CANCELADO -> PassStatus.CANCELADO
+        RECHAZADO -> PassStatus.RECHAZADO
+    }
+}
+
+enum class PassStatus(val label: String) {
+    EMITIDO("Emitido"),
+    VALIDADO("Validado"),
+    USADO("Usado"),
+    EXPIRADO("Expirado"),
+    CANCELADO("Cancelado"),
+    RECHAZADO("Rechazado"),
+
+    // Compatibilidad retroactiva con código existente
+    VALID("Válido"),
+    INVALID("Inválido"),
+    ALREADY_USED("Ya utilizado"),
+    EXPIRED("Expirado")
 }
 
 enum class PassType(val label: String) {
@@ -29,7 +64,12 @@ data class QrPassEntity(
     val validUntilMillis: Long,
     val maxEntries: Int = 1,
     var currentEntriesCount: Int = 0,
-    val note: String? = null
+    val note: String? = null,
+    val residentId: String = "RES-${destinationHouse.filter { it.isDigit() }.ifBlank { "000" }}",
+    val assignedUnit: String = destinationHouse,
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val status: QrPassStatus = QrPassStatus.EMITIDO,
+    val digitalSignature: String = ""
 ) {
     fun toRoomEntity(): com.example.data.passes.QrPassRoomEntity {
         return com.example.data.passes.QrPassRoomEntity(
@@ -44,7 +84,12 @@ data class QrPassEntity(
             maxEntries = maxEntries,
             currentEntriesCount = currentEntriesCount,
             note = note,
-            isActive = true
+            createdAtMillis = createdAtMillis,
+            isActive = (status == QrPassStatus.EMITIDO || status == QrPassStatus.VALIDADO) && currentEntriesCount < maxEntries,
+            residentId = residentId,
+            assignedUnit = assignedUnit,
+            status = status,
+            digitalSignature = digitalSignature
         )
     }
 }

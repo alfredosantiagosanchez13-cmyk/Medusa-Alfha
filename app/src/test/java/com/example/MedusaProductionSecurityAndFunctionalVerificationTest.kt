@@ -11,10 +11,18 @@ import com.example.data.auth.MedusaFinancialAccessGuard
 import com.example.data.auth.MedusaRole
 import com.example.data.auth.UserSession
 import com.example.data.core.AlphaCoreEngine
+import com.example.data.core.AlphaSecurityAuthority
+import com.example.data.passes.QrPassDao
+import com.example.data.passes.QrPassRepository
 import com.example.data.passes.QrPassRoomEntity
 import com.example.data.supervision.GeoAlphaTourEngine
 import com.example.data.vecinos.LosPradosCroquisData
+import com.example.scanner.PassStatus
+import com.example.scanner.PassType
+import com.example.scanner.QrPassStatus
 import com.example.ui.navigation.Screen
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -305,5 +313,303 @@ class MedusaProductionSecurityAndFunctionalVerificationTest {
         assertNull("MEDUSA-ADM-2026 NO debe ser una llave válida ni en debug ni en producción", evaluatedBypass1)
         val evaluatedBypass2 = MedusaDevConfig.evaluateDebugKey("MEDUSA-CASETA-2026")
         assertNull("MEDUSA-CASETA-2026 NO debe ser una llave válida ni en debug ni en producción", evaluatedBypass2)
+    }
+
+    // =========================================================================
+    // 7. ORDEN MAESTRA: VALIDACIÓN TÁCTICA DEL FLUJO QR DE VISITANTES (RED TEAM)
+    // =========================================================================
+    @Test
+    fun test07_ValidacionTacticaFlujoQrVisitantes_RedTeamInterno() = runBlocking {
+        val fakeDao = InMemoryQrPassDao()
+        val repository = QrPassRepository(fakeDao)
+
+        val residentHouse = "Casa 73"
+        val residentSession = UserSession(
+            activationKey = "AUTH-RES-073",
+            currentRole = MedusaRole.RESIDENTE,
+            condominiumId = "PRADOS_1",
+            assignedUnitId = residentHouse,
+            condominiumName = "Los Prados 1",
+            isActive = true,
+            isFinancialBlocked = false,
+            timestampMillis = System.currentTimeMillis()
+        )
+
+        val now = System.currentTimeMillis()
+        val validUntil = now + 7200000L // 2 horas de vigencia
+
+        // Flujo legítimo: Generación de Pase por Residente Autorizado
+        val validFolio = "MED-20260928-8801"
+        val guest = "Lic. Martin Beristain"
+        val canonicalValid = AlphaCoreEngine.buildCanonicalPayload(
+            folio = validFolio,
+            residentId = residentSession.activationKey,
+            assignedUnit = residentHouse,
+            guestName = guest,
+            createdAtMillis = now,
+            validUntilMillis = validUntil,
+            passType = PassType.VISITOR_SINGLE.name
+        )
+        val authenticSignature = AlphaSecurityAuthority.signPassPayload(canonicalValid, residentSession)
+
+        // 1. Vector 1: Generar un QR alterando el folio (Falsificación / Tampering)
+        val tamperedFolio = "MED-20260928-9999"
+        val tamperedCanonical = AlphaCoreEngine.buildCanonicalPayload(
+            folio = tamperedFolio,
+            residentId = residentSession.activationKey,
+            assignedUnit = residentHouse,
+            guestName = guest,
+            createdAtMillis = now,
+            validUntilMillis = validUntil,
+            passType = PassType.VISITOR_SINGLE.name
+        )
+        assertFalse(
+            "La firma auténtica NO debe ser válida tras alterar el folio",
+            AlphaSecurityAuthority.verifyPassSignature(tamperedCanonical, authenticSignature)
+        )
+        val tamperedPassEntity = QrPassRoomEntity(
+            passCode = tamperedFolio,
+            guestName = guest,
+            guestDocument = "INE-991122",
+            destinationHouse = residentHouse,
+            hostResidentName = "Residente Casa 73",
+            passType = PassType.VISITOR_SINGLE,
+            createdAtMillis = now,
+            validUntilMillis = validUntil,
+            maxEntries = 1,
+            currentEntriesCount = 0,
+            residentId = residentSession.activationKey,
+            assignedUnit = residentHouse,
+            status = QrPassStatus.EMITIDO,
+            digitalSignature = authenticSignature
+        )
+        fakeDao.insertPass(tamperedPassEntity)
+        val resultTampered = repository.verifyPassCode(tamperedFolio, "PRADOS_1")
+        assertEquals(PassStatus.RECHAZADO, resultTampered.status)
+        assertTrue(resultTampered.failureReason?.contains("Firma digital alterada") == true)
+
+        // 2. Vector 2: Generar un QR cambiando la vivienda a otra que no pertenece al residente
+        val unauthorizedHouse = "Casa 200"
+        val unauthorizedCanonical = AlphaCoreEngine.buildCanonicalPayload(
+            folio = "MED-20260928-8802",
+            residentId = residentSession.activationKey,
+            assignedUnit = unauthorizedHouse,
+            guestName = guest,
+            createdAtMillis = now,
+            validUntilMillis = validUntil,
+            passType = PassType.VISITOR_SINGLE.name
+        )
+        assertThrows(SecurityException::class.java) {
+            AlphaSecurityAuthority.signPassPayload(unauthorizedCanonical, residentSession)
+        }
+
+        // 3. Vector 3: Reutilizar un pase de entrada única ya usado
+        val usedPassFolio = "MED-20260928-8803"
+        val canonicalUsed = AlphaCoreEngine.buildCanonicalPayload(
+            folio = usedPassFolio,
+            residentId = residentSession.activationKey,
+            assignedUnit = residentHouse,
+            guestName = "Doctora Sonia Paz",
+            createdAtMillis = now,
+            validUntilMillis = validUntil,
+            passType = PassType.VISITOR_SINGLE.name
+        )
+        val sigUsed = AlphaSecurityAuthority.signPassPayload(canonicalUsed, residentSession)
+        val legitimatePass = QrPassRoomEntity(
+            passCode = usedPassFolio,
+            guestName = "Doctora Sonia Paz",
+            guestDocument = "INE-445566",
+            destinationHouse = residentHouse,
+            hostResidentName = "Residente Casa 73",
+            passType = PassType.VISITOR_SINGLE,
+            createdAtMillis = now,
+            validUntilMillis = validUntil,
+            maxEntries = 1,
+            currentEntriesCount = 0,
+            residentId = residentSession.activationKey,
+            assignedUnit = residentHouse,
+            status = QrPassStatus.EMITIDO,
+            digitalSignature = sigUsed
+        )
+        fakeDao.insertPass(legitimatePass)
+
+        // Primer escaneo en Caseta: Debe validar
+        val firstValidation = repository.verifyPassCode(usedPassFolio, "PRADOS_1")
+        assertEquals(firstValidation.failureReason ?: "Sin motivo", PassStatus.VALIDADO, firstValidation.status)
+
+        // Confirmar entrada (Guardia abre barrera)
+        repository.markPassAsUsed(usedPassFolio)
+        val passAfterEntry = fakeDao.getPassByCode(usedPassFolio)
+        assertEquals(QrPassStatus.USADO, passAfterEntry?.status)
+        assertEquals(1, passAfterEntry?.currentEntriesCount)
+        assertFalse(passAfterEntry?.isActive ?: true)
+
+        // Reintento de ingreso con el mismo pase: ACCESO DENEGADO / USADO
+        val secondValidation = repository.verifyPassCode(usedPassFolio, "PRADOS_1")
+        assertEquals(PassStatus.USADO, secondValidation.status)
+        assertTrue(secondValidation.failureReason?.contains("ya fue utilizado") == true)
+
+        // 4. Vector 4: Presentar un pase expirado
+        val expiredFolio = "MED-20260928-8804"
+        val pastTime = now - 3600000L // expiró hace 1 hora
+        val canonicalExpired = AlphaCoreEngine.buildCanonicalPayload(
+            folio = expiredFolio,
+            residentId = residentSession.activationKey,
+            assignedUnit = residentHouse,
+            guestName = "Ing. Esteban Cruz",
+            createdAtMillis = pastTime - 3600000L,
+            validUntilMillis = pastTime,
+            passType = PassType.VISITOR_SINGLE.name
+        )
+        val sigExpired = AlphaSecurityAuthority.signPassPayload(canonicalExpired, residentSession)
+        val expiredPass = QrPassRoomEntity(
+            passCode = expiredFolio,
+            guestName = "Ing. Esteban Cruz",
+            guestDocument = "INE-778899",
+            destinationHouse = residentHouse,
+            hostResidentName = "Residente Casa 73",
+            passType = PassType.VISITOR_SINGLE,
+            createdAtMillis = pastTime - 3600000L,
+            validUntilMillis = pastTime,
+            maxEntries = 1,
+            currentEntriesCount = 0,
+            residentId = residentSession.activationKey,
+            assignedUnit = residentHouse,
+            status = QrPassStatus.EMITIDO,
+            digitalSignature = sigExpired
+        )
+        fakeDao.insertPass(expiredPass)
+
+        val resultExpired = repository.verifyPassCode(expiredFolio, "PRADOS_1")
+        assertEquals(PassStatus.EXPIRADO, resultExpired.status)
+        assertTrue(resultExpired.failureReason?.contains("expiró") == true)
+        val passInDb = fakeDao.getPassByCode(expiredFolio)
+        assertEquals(QrPassStatus.EXPIRADO, passInDb?.status)
+
+        // 5. Vector 5: Intentar validar un QR generado con algoritmo/clave externa
+        val externalFolio = "MED-20260928-8805"
+        val foreignKeyGen = java.security.KeyPairGenerator.getInstance("EC")
+        foreignKeyGen.initialize(java.security.spec.ECGenParameterSpec("secp256r1"))
+        val foreignPair = foreignKeyGen.generateKeyPair()
+
+        val externalCanonical = AlphaCoreEngine.buildCanonicalPayload(
+            folio = externalFolio,
+            residentId = residentSession.activationKey,
+            assignedUnit = residentHouse,
+            guestName = "Intruso Foráneo",
+            createdAtMillis = now,
+            validUntilMillis = validUntil,
+            passType = PassType.VISITOR_SINGLE.name
+        )
+        val signer = java.security.Signature.getInstance("SHA256withECDSA")
+        signer.initSign(foreignPair.private)
+        signer.update(externalCanonical.toByteArray(Charsets.UTF_8))
+        val foreignSigBase64 = java.util.Base64.getEncoder().encodeToString(signer.sign())
+
+        assertFalse(
+            "Firma generada con clave privada externa debe ser rechazada",
+            AlphaSecurityAuthority.verifyPassSignature(externalCanonical, foreignSigBase64)
+        )
+
+        val foreignPass = QrPassRoomEntity(
+            passCode = externalFolio,
+            guestName = "Intruso Foráneo",
+            guestDocument = "FORANEO-999",
+            destinationHouse = residentHouse,
+            hostResidentName = "Residente Casa 73",
+            passType = PassType.VISITOR_SINGLE,
+            createdAtMillis = now,
+            validUntilMillis = validUntil,
+            maxEntries = 1,
+            currentEntriesCount = 0,
+            residentId = residentSession.activationKey,
+            assignedUnit = residentHouse,
+            status = QrPassStatus.EMITIDO,
+            digitalSignature = foreignSigBase64
+        )
+        fakeDao.insertPass(foreignPass)
+
+        val resultForeign = repository.verifyPassCode(externalFolio, "PRADOS_1")
+        assertEquals(PassStatus.RECHAZADO, resultForeign.status)
+        assertTrue(resultForeign.failureReason?.contains("Firma digital alterada o no auténtica") == true)
+    }
+}
+
+private class InMemoryQrPassDao : QrPassDao {
+    private val store = mutableMapOf<String, QrPassRoomEntity>()
+
+    override fun getAllPassesFlow(): kotlinx.coroutines.flow.Flow<List<QrPassRoomEntity>> =
+        kotlinx.coroutines.flow.flowOf(store.values.toList())
+
+    override suspend fun getAllPassesList(): List<QrPassRoomEntity> =
+        store.values.toList()
+
+    override suspend fun getPassByCode(passCode: String): QrPassRoomEntity? =
+        store[passCode]
+
+    override fun getPassesByHouse(house: String): kotlinx.coroutines.flow.Flow<List<QrPassRoomEntity>> =
+        kotlinx.coroutines.flow.flowOf(store.values.filter { it.destinationHouse == house || it.assignedUnit == house })
+
+    override fun getPassesByResidentId(residentId: String): kotlinx.coroutines.flow.Flow<List<QrPassRoomEntity>> =
+        kotlinx.coroutines.flow.flowOf(store.values.filter { it.residentId == residentId })
+
+    override suspend fun insertPass(pass: QrPassRoomEntity) {
+        store[pass.passCode] = pass
+    }
+
+    override suspend fun insertPasses(passes: List<QrPassRoomEntity>) {
+        passes.forEach { store[it.passCode] = it }
+    }
+
+    override suspend fun updatePass(pass: QrPassRoomEntity) {
+        store[pass.passCode] = pass
+    }
+
+    override suspend fun incrementUsage(passCode: String) {
+        store[passCode]?.let { store[passCode] = it.copy(currentEntriesCount = it.currentEntriesCount + 1) }
+    }
+
+    override suspend fun updatePassStatus(passCode: String, status: QrPassStatus) {
+        store[passCode]?.let { store[passCode] = it.copy(status = status) }
+    }
+
+    override suspend fun markPassAsValidated(passCode: String) {
+        store[passCode]?.let { store[passCode] = it.copy(status = QrPassStatus.VALIDADO) }
+    }
+
+    override suspend fun markPassAsUsedAndClose(passCode: String) {
+        store[passCode]?.let {
+            store[passCode] = it.copy(
+                status = QrPassStatus.USADO,
+                currentEntriesCount = it.currentEntriesCount + 1,
+                isActive = false
+            )
+        }
+    }
+
+    override suspend fun markPassAsExpired(passCode: String) {
+        store[passCode]?.let { store[passCode] = it.copy(status = QrPassStatus.EXPIRADO, isActive = false) }
+    }
+
+    override suspend fun markPassAsRejected(passCode: String) {
+        store[passCode]?.let { store[passCode] = it.copy(status = QrPassStatus.RECHAZADO, isActive = false) }
+    }
+
+    override suspend fun cancelPass(passCode: String) {
+        store[passCode]?.let { store[passCode] = it.copy(status = QrPassStatus.CANCELADO, isActive = false) }
+    }
+
+    override suspend fun deactivatePass(passCode: String) {
+        store[passCode]?.let { store[passCode] = it.copy(isActive = false) }
+    }
+
+    override suspend fun getPassCount(): Int = store.size
+
+    override suspend fun deletePass(passCode: String) {
+        store.remove(passCode)
+    }
+
+    override suspend fun deleteAllPasses() {
+        store.clear()
     }
 }

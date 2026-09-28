@@ -5,6 +5,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.example.data.core.AlphaCoreEngine
 import com.example.scanner.PassType
+import com.example.scanner.QrPassStatus
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -14,7 +15,10 @@ import java.util.Locale
     indices = [
         Index(value = ["passCode"], unique = true),
         Index(value = ["destinationHouse"]),
-        Index(value = ["validUntilMillis"])
+        Index(value = ["assignedUnit"]),
+        Index(value = ["residentId"]),
+        Index(value = ["validUntilMillis"]),
+        Index(value = ["status"])
     ]
 )
 data class QrPassRoomEntity(
@@ -31,17 +35,21 @@ data class QrPassRoomEntity(
     val currentEntriesCount: Int = 0,
     val note: String? = null,
     val createdAtMillis: Long = System.currentTimeMillis(),
-    val integrityHash: String = AlphaCoreEngine.computeIntegrityHash(passCode, guestDocument, destinationHouse),
-    val isActive: Boolean = true
+    val integrityHash: String = "",
+    val isActive: Boolean = true,
+    val residentId: String = "RES-${destinationHouse.filter { it.isDigit() }.ifBlank { "000" }}",
+    val assignedUnit: String = destinationHouse,
+    val status: QrPassStatus = QrPassStatus.EMITIDO,
+    val digitalSignature: String = ""
 ) {
     val isExpired: Boolean
-        get() = System.currentTimeMillis() > validUntilMillis
+        get() = status == QrPassStatus.EXPIRADO || System.currentTimeMillis() > validUntilMillis
 
     val isExhausted: Boolean
         get() = currentEntriesCount >= maxEntries
 
     val isValidForEntry: Boolean
-        get() = isActive && !isExpired && !isExhausted
+        get() = isActive && (status == QrPassStatus.EMITIDO || status == QrPassStatus.VALIDADO) && !isExpired && !isExhausted
 
     val formattedValidUntil: String
         get() = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date(validUntilMillis))
