@@ -243,47 +243,6 @@ fun ActivationScreen(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            // Accesos de prueba aislados exclusivamente para compilaciones de desarrollo (DEBUG)
-            // En producción (!BuildConfig.DEBUG) este bloque no se renderiza.
-            if (BuildConfig.DEBUG) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SuggestionChip(
-                        onClick = {
-                            inputKey = "DEV-ADM-PRADOS"
-                            focusManager.clearFocus()
-                            activationViewModel.validateActivationKey("DEV-ADM-PRADOS")
-                        },
-                        label = { 
-                            Text("🛠️ DEBUG ADM", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = GoldPrimary) 
-                        },
-                        colors = SuggestionChipDefaults.suggestionChipColors(
-                            containerColor = NavySurface
-                        ),
-                        border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.4f)),
-                        modifier = Modifier.weight(1f)
-                    )
-                    SuggestionChip(
-                        onClick = {
-                            inputKey = "DEV-CASETA-PRADOS"
-                            focusManager.clearFocus()
-                            activationViewModel.validateActivationKey("DEV-CASETA-PRADOS")
-                        },
-                        label = { 
-                            Text("🛠️ DEBUG CASETA", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = CyanNeon) 
-                        },
-                        colors = SuggestionChipDefaults.suggestionChipColors(
-                            containerColor = NavySurface
-                        ),
-                        border = BorderStroke(1.dp, CyanNeon.copy(alpha = 0.4f)),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
             Spacer(modifier = Modifier.height(10.dp))
 
             // Botón de Validación Oficial

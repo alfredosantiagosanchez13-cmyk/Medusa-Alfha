@@ -45,19 +45,23 @@ import com.example.data.auth.MedusaRole
 import com.example.data.auth.MedusaSessionData
 import com.example.data.core.AlphaCoreEngine
 import com.example.data.booking.AmenityBooking
+import com.example.data.booking.AmenityBookingEngine
 import com.example.data.booking.AppDatabase
+import com.example.data.booking.BookingExecutionResult
+import com.example.data.booking.TimeSlotAvailability
 import com.example.data.finance.MaintenancePaymentEntity
 import com.example.data.finance.MaintenancePaymentRepository
 import com.example.data.passes.QrPassRoomEntity
 import com.example.data.visitor.VisitorPassEntity
 import com.example.data.visitor.VisitorPassRepository
 import com.example.scanner.PassType
+import com.example.ui.components.AmenityCalendarView
 import com.example.ui.components.MaintenancePaymentHistorySection
-import com.example.ui.components.ProximityGateControlCard
 import com.example.ui.components.PaymentReceiptDetailDialog
+import com.example.ui.components.ProximityGateControlCard
+import com.example.ui.components.ResidentFirebaseAuthBarrier
 import com.example.ui.components.SmartBookingAlerts
 import com.example.ui.components.VisitorHistoryLogList
-import com.example.ui.components.ResidentFirebaseAuthBarrier
 import com.example.ui.components.scheduleSmartBookingPassAlert
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.ActivationViewModel
@@ -472,6 +476,7 @@ fun PortalResidentesScreen(
                             onDismissOrBack = { selectedTab = ResidentPortalTab.MI_RESIDENCIA }
                         ) { resident ->
                             ResidentAmenitiesCalendarTabContent(
+                                db = db,
                                 condominiumId = condominiumId,
                                 assignedUnit = resident.unitId.ifBlank { assignedUnit },
                                 allBookings = allBookings,
@@ -1650,11 +1655,12 @@ private fun QrDetailModal(
 }
 
 // =========================================================================================
-// PESTAÑA 3: RESERVAS DE AMENIDADES CON PRIVACIDAD (Horarios ocupados anónimos "RESERVADO")
+// PESTAÑA 3: RESERVAS DE AMENIDADES CON CALENDARIO COMPLETO Y FIRESTORE
 // =========================================================================================
 
 @Composable
 private fun ResidentAmenitiesCalendarTabContent(
+    db: AppDatabase,
     condominiumId: String,
     assignedUnit: String,
     allBookings: List<AmenityBooking>,
@@ -1662,29 +1668,12 @@ private fun ResidentAmenitiesCalendarTabContent(
     onOpenBookingDialog: () -> Unit,
     onGenerateGuestPassForBooking: (AmenityBooking) -> Unit
 ) {
-    val commonAreas = listOf("Alberca Principal", "Quincho & BBQ", "Cancha de Pádel")
-    var selectedAmenity by remember { mutableStateOf(commonAreas.first()) }
-    val todayDateStr = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
-
-    // Filtrar reservas del día para el área seleccionada
-    val amenityBookingsToday = remember(allBookings, selectedAmenity, todayDateStr) {
-        allBookings.filter { it.amenityName == selectedAmenity && it.bookingDate == todayDateStr }
-    }
-
-    val standardTimeSlots = listOf(
-        "09:00 - 11:00",
-        "11:00 - 13:00",
-        "13:00 - 15:00",
-        "15:00 - 17:00",
-        "17:00 - 19:00",
-        "19:00 - 21:00"
-    )
-
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(bottom = 24.dp)
     ) {
-        // COMPONENTE DE ALERTAS INTELIGENTES DE RESERVA (Alberca, Quincho, etc.)
+        // 1. Alertas inteligentes de reserva activa
         item {
             SmartBookingAlerts(
                 condominiumId = condominiumId,
@@ -1694,133 +1683,20 @@ private fun ResidentAmenitiesCalendarTabContent(
             )
         }
 
-        // Selector de Amenidades
+        // 2. Calendario interactivo multi-mes y reservas con sincronización Firestore
         item {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(commonAreas) { area ->
-                    val isSelected = selectedAmenity == area
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { selectedAmenity = area },
-                        label = { Text(area, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = GoldPrimary,
-                            selectedLabelColor = NavyDark,
-                            containerColor = NavySurface,
-                            labelColor = TextWhite
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = isSelected,
-                            borderColor = Color(0xFF334155),
-                            selectedBorderColor = GoldPrimary
-                        )
-                    )
-                }
-            }
-        }
-
-        // Encabezado del Calendario Sintético de Hoy
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Horarios de Hoy ($todayDateStr)",
-                        color = TextWhite,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Protección de privacidad: Ocupantes externos anonimizados",
-                        color = TextMuted,
-                        fontSize = 11.sp
-                    )
-                }
-
-                Button(
-                    onClick = onOpenBookingDialog,
-                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen, contentColor = NavyDark),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Apartar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        // Bloques de Horario Sintéticos
-        items(standardTimeSlots) { slot ->
-            val matchingBooking = amenityBookingsToday.firstOrNull { it.timeSlot.contains(slot.take(5)) }
-            val isBooked = matchingBooking != null
-            val isMyBooking = matchingBooking?.unitId == assignedUnit
-
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                color = NavySurface,
-                border = BorderStroke(
-                    1.dp,
-                    if (isMyBooking) GoldPrimary else if (isBooked) ErrorRed.copy(alpha = 0.4f) else Color(0xFF334155)
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Schedule,
-                            contentDescription = null,
-                            tint = if (isMyBooking) GoldPrimary else if (isBooked) ErrorRed else SuccessGreen,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = slot,
-                            color = TextWhite,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    // Anonimización estricta de terceros
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (isMyBooking) GoldPrimary.copy(alpha = 0.2f) else if (isBooked) ErrorRed.copy(alpha = 0.15f) else SuccessGreen.copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, if (isMyBooking) GoldPrimary else if (isBooked) ErrorRed else SuccessGreen)
-                    ) {
-                        Text(
-                            text = when {
-                                isMyBooking -> "MI RESERVA (${assignedUnit})"
-                                isBooked -> "RESERVADO" // Protege privacidad ajena
-                                else -> "DISPONIBLE"
-                            },
-                            color = if (isMyBooking) GoldPrimary else if (isBooked) ErrorRed else SuccessGreen,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                }
-            }
+            AmenityCalendarView(
+                db = db,
+                initialCondominiumId = condominiumId,
+                filterUnitId = assignedUnit,
+                onShowQrPass = onGenerateGuestPassForBooking
+            )
         }
     }
 }
 
 /**
- * Modal para solicitar y agendar una reserva de amenidad con persistencia local en Room.
+ * Modal para agendar una reserva de amenidad con persistencia en Firestore y Room.
  */
 @Composable
 private fun CreateAmenityBookingModal(
@@ -1833,26 +1709,60 @@ private fun CreateAmenityBookingModal(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val commonAreas = listOf("Alberca Principal", "Quincho & BBQ", "Cancha de Pádel")
-    var selectedArea by remember { mutableStateOf(commonAreas.first()) }
-    val standardSlots = listOf("09:00 - 11:00", "11:00 - 13:00", "13:00 - 15:00", "15:00 - 17:00", "17:00 - 19:00", "19:00 - 21:00")
-    var selectedSlot by remember { mutableStateOf(standardSlots.first()) }
+    val catalog = AmenityBookingEngine.CATALOG
+    var selectedAmenity by remember { mutableStateOf(catalog.first()) }
+
+    var selectedDateOffset by remember { mutableStateOf(0) }
+    val dateOffsets = listOf(
+        0 to "Hoy",
+        1 to "Mañana",
+        2 to "+2 días",
+        3 to "+3 días",
+        4 to "+4 días"
+    )
+
+    val targetDateCalendar = remember(selectedDateOffset) {
+        Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, selectedDateOffset)
+        }
+    }
+
+    var availableSlots by remember { mutableStateOf<List<TimeSlotAvailability>>(emptyList()) }
+    var selectedSlot by remember { mutableStateOf<TimeSlotAvailability?>(null) }
+    var isLoadingSlots by remember { mutableStateOf(false) }
+    var notes by remember { mutableStateOf("") }
     var isSaving by remember { mutableStateOf(false) }
 
+    LaunchedEffect(selectedAmenity, selectedDateOffset) {
+        isLoadingSlots = true
+        val slots = AmenityBookingEngine.getDailyAvailability(
+            db = db,
+            amenityName = selectedAmenity.name,
+            targetDateCalendar = targetDateCalendar,
+            condominiumId = condominiumId
+        )
+        availableSlots = slots
+        selectedSlot = slots.firstOrNull { it.isAvailable }
+        isLoadingSlots = false
+    }
+
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSaving) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(
             modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .wrapContentHeight(),
-            shape = RoundedCornerShape(20.dp),
+                .fillMaxWidth(0.94f)
+                .wrapContentHeight()
+                .padding(vertical = 16.dp),
+            shape = RoundedCornerShape(22.dp),
             color = NavySurface,
-            border = BorderStroke(1.dp, SuccessGreen)
+            border = BorderStroke(1.5.dp, SuccessGreen)
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(
@@ -1860,29 +1770,49 @@ private fun CreateAmenityBookingModal(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Reservar Área Común",
-                        color = TextWhite,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .background(SuccessGreen.copy(alpha = 0.2f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Reservar Área Común",
+                                color = TextWhite,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Sincronizado con Firestore y Room",
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = TextMuted)
                     }
                 }
 
+                // 1. Selector de Área
                 Text(
-                    text = "Área:",
+                    text = "Área Común:",
                     color = TextMuted,
-                    fontSize = 12.sp
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
                 )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(commonAreas) { area ->
-                        val isSelected = selectedArea == area
+                    items(catalog) { item ->
+                        val isSelected = selectedAmenity.id == item.id
                         FilterChip(
                             selected = isSelected,
-                            onClick = { selectedArea = area },
-                            label = { Text(area, fontSize = 12.sp) },
+                            onClick = { selectedAmenity = item },
+                            label = { Text(item.name, fontSize = 11.sp) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = SuccessGreen,
                                 selectedLabelColor = NavyDark,
@@ -1893,65 +1823,161 @@ private fun CreateAmenityBookingModal(
                     }
                 }
 
+                // 2. Selector de Fecha
                 Text(
-                    text = "Horario Deseado:",
+                    text = "Fecha de la Reserva:",
                     color = TextMuted,
-                    fontSize = 12.sp
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
                 )
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(standardSlots) { slot ->
-                        val isSelected = selectedSlot == slot
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { selectedSlot = slot },
-                            label = { Text(slot, fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = GoldPrimary,
-                                selectedLabelColor = NavyDark,
-                                containerColor = NavyDark,
-                                labelColor = TextWhite
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    dateOffsets.forEach { (offset, label) ->
+                        val isSelected = selectedDateOffset == offset
+                        Surface(
+                            onClick = { selectedDateOffset = offset },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) GoldPrimary else NavyDark,
+                            border = BorderStroke(1.dp, if (isSelected) GoldPrimary else Color.White.copy(alpha = 0.1f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isSelected) NavyDark else Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                textAlign = TextAlign.Center
                             )
-                        )
+                        }
                     }
                 }
 
-                // Persistencia local en Room
-                Button(
-                    onClick = {
-                        isSaving = true
-                        scope.launch {
-                            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                            val dateDigits = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
-                            val folio = "RSV-$dateDigits-${(100..999).random()}"
-                            val newBooking = AmenityBooking(
-                                folio = folio,
-                                amenityName = selectedArea,
-                                unitId = assignedUnit,
-                                residentName = "Titular $assignedUnit",
-                                bookingDate = todayStr,
-                                timeSlot = selectedSlot,
-                                bookingTimeMillis = System.currentTimeMillis() + 3600000,
-                                durationMinutes = 120,
-                                status = "CONFIRMADA",
-                                condominiumId = condominiumId
-                            )
-                            db.amenityBookingDao().insertBooking(newBooking)
-
-                            // Programar alerta inteligente local con AlarmManager para 15 minutos antes
-                            AmenityReminderManager.schedule15MinReminder(
-                                context = context,
-                                booking = newBooking,
-                                folio = folio,
-                                guestName = "Titular $assignedUnit"
-                            )
-
-                            withContext(Dispatchers.Main) {
-                                isSaving = false
-                                onBookingCreated()
+                // 3. Horarios Disponibles
+                Text(
+                    text = "Horario Disponible:",
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                if (isLoadingSlots) {
+                    Box(modifier = Modifier.fillMaxWidth().height(50.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = SuccessGreen)
+                    }
+                } else if (availableSlots.isEmpty()) {
+                    Text("No hay horarios configurados.", color = TextMuted, fontSize = 11.sp)
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        availableSlots.forEach { slot ->
+                            val isSelected = selectedSlot?.slotLabel == slot.slotLabel
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = slot.isAvailable) {
+                                        selectedSlot = slot
+                                    },
+                                shape = RoundedCornerShape(10.dp),
+                                color = when {
+                                    isSelected -> SuccessGreen.copy(alpha = 0.2f)
+                                    slot.isAvailable -> NavyDark
+                                    else -> NavyDark.copy(alpha = 0.4f)
+                                },
+                                border = BorderStroke(
+                                    1.dp,
+                                    when {
+                                        isSelected -> SuccessGreen
+                                        slot.isAvailable -> Color.White.copy(alpha = 0.15f)
+                                        else -> ErrorRed.copy(alpha = 0.3f)
+                                    }
+                                )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = slot.slotLabel,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isSelected) SuccessGreen else if (slot.isAvailable) Color.White else TextMuted
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = if (slot.isAvailable) SuccessGreen.copy(alpha = 0.15f) else ErrorRed.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = if (slot.isAvailable) "DISPONIBLE" else "OCUPADO",
+                                            color = if (slot.isAvailable) SuccessGreen else ErrorRed,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
+                    }
+                }
+
+                // 4. Notas opcionales
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    label = { Text("Motivo / Notas (Opcional)", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = SuccessGreen,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                // 5. Botón de Confirmación y Persistencia en Firestore
+                Button(
+                    onClick = {
+                        val slot = selectedSlot ?: return@Button
+                        isSaving = true
+                        scope.launch {
+                            val result = AmenityBookingEngine.executeOneTapBooking(
+                                context = context,
+                                db = db,
+                                amenityName = selectedAmenity.name,
+                                residentName = "Titular $assignedUnit",
+                                unitId = assignedUnit,
+                                startMillis = slot.startMillis,
+                                durationMinutes = ((slot.endMillis - slot.startMillis) / 60000).toInt(),
+                                notes = notes.ifBlank { "Reserva desde Portal Residente" },
+                                operatorName = "Titular $assignedUnit",
+                                condominiumId = condominiumId
+                            )
+
+                            when (result) {
+                                is BookingExecutionResult.Success -> {
+                                    Toast.makeText(
+                                        context,
+                                        "✅ Reserva confirmada en Firestore y Room [${result.booking.folio}]",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    onBookingCreated()
+                                    onDismiss()
+                                }
+                                is BookingExecutionResult.Conflict -> {
+                                    Toast.makeText(context, "⚠️ Horario no disponible: ${result.message}", Toast.LENGTH_LONG).show()
+                                }
+                                is BookingExecutionResult.Error -> {
+                                    Toast.makeText(context, "Error: ${result.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            isSaving = false
+                        }
                     },
-                    enabled = !isSaving,
+                    enabled = !isSaving && selectedSlot != null,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
@@ -1960,8 +1986,16 @@ private fun CreateAmenityBookingModal(
                 ) {
                     if (isSaving) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = NavyDark, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Sincronizando con Firestore...", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     } else {
-                        Text("Confirmar y Guardar en Room", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Icon(Icons.Default.EventAvailable, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (selectedSlot != null) "Confirmar Reserva [${selectedSlot?.slotLabel}]" else "Selecciona un Horario Libre",
+                            fontWeight = FontWeight.Black,
+                            fontSize = 13.sp
+                        )
                     }
                 }
             }

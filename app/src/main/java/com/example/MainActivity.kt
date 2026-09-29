@@ -135,13 +135,6 @@ class MainActivity : FragmentActivity() {
                             currentSession = currentSession,
                             activationViewModel = activationViewModel
                         )
-
-                        DebugDiagnosticOverlay(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .statusBarsPadding()
-                                .padding(top = 8.dp, end = 14.dp)
-                        )
                     }
                 }
             }
