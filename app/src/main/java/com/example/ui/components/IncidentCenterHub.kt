@@ -470,10 +470,11 @@ fun IncidentCenterHub(
 
     // --- DIÁLOGOS OPERATIVOS ---
 
-    // 1. Diálogo de Nueva Incidencia (Voz + Texto + Auto-Asignación)
+    // 1. Diálogo Oficial de Nueva Incidencia (Residencial Los Prados · Tiempo = Familia)
     if (showNewIncidentDialog) {
-        NewIncidentCreationDialog(
+        PradosIncidentReportDialog(
             db = db,
+            condominiumId = "PRADOS_1",
             onDismiss = { showNewIncidentDialog = false },
             onIncidentCreated = {
                 showNewIncidentDialog = false

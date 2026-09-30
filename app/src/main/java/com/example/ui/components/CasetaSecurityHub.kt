@@ -2072,9 +2072,7 @@ fun CasetaIncidentesIsolatedSection(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showReportDialog by remember { mutableStateOf(false) }
-    var locationInput by remember(condo) { mutableStateOf(if (condo == CondoTarget.PARAISO) "Caseta Cond. Paraíso" else "${condo.displayName} - Entrada") }
-    var detailsInput by remember { mutableStateOf("") }
-    var selectedPriority by remember { mutableStateOf(IncidentPriority.ALTA) }
+    var selectedIncidentForDetail by remember { mutableStateOf<IncidentEntity?>(null) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -2082,79 +2080,16 @@ fun CasetaIncidentesIsolatedSection(
     ) {
         item {
             Button(
-                onClick = { showReportDialog = !showReportDialog },
+                onClick = { showReportDialog = true },
                 colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = Color.White),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(44.dp)
+                    .height(46.dp)
             ) {
                 Icon(Icons.Default.Warning, contentDescription = null)
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("🚨 Levantar Incidencia en ${condo.displayName}", fontWeight = FontWeight.Bold)
-            }
-        }
-
-        if (showReportDialog) {
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = NavyCard),
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, ErrorRed)
-                ) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("🚨 NUEVO REPORTE · ${condo.displayName.uppercase()}", color = ErrorRed, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-
-                        OutlinedTextField(
-                            value = locationInput,
-                            onValueChange = { locationInput = it },
-                            label = { Text("Ubicación exacta en ${condo.displayName}") },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        OutlinedTextField(
-                            value = detailsInput,
-                            onValueChange = { detailsInput = it },
-                            label = { Text("Descripción de los hechos y novedades") },
-                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Button(
-                            onClick = {
-                                if (detailsInput.isNotBlank()) {
-                                    val folio = AlphaCoreEngine.generateUniqueFolio("MED")
-                                    scope.launch {
-                                        incidentDao.insertIncident(
-                                            IncidentEntity(
-                                                folio = folio,
-                                                rawTranscript = detailsInput.trim(),
-                                                category = IncidentCategory.SEGURIDAD_EMERGENCIA,
-                                                priority = selectedPriority,
-                                                location = locationInput.trim(),
-                                                aiSummary = detailsInput.trim(),
-                                                recommendedAction = "Verificación inmediata de seguridad en ${condo.displayName}",
-                                                reportedBy = "Guardia ${condo.displayName}",
-                                                reportedByRole = "GUARDIA",
-                                                status = "REGISTRADO"
-                                            )
-                                        )
-                                        showReportDialog = false
-                                        detailsInput = ""
-                                        Toast.makeText(context, "🚨 Incidencia registrada en ${condo.displayName} (Folio $folio)", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = Color.White),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Confirmar y Transmitir Alerta", fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
+                Text("🚨 Levantar Novedad / Incidencia en ${condo.displayName}", fontWeight = FontWeight.Bold)
             }
         }
 
@@ -2174,18 +2109,70 @@ fun CasetaIncidentesIsolatedSection(
             Card(
                 colors = CardDefaults.cardColors(containerColor = NavyCard),
                 shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, if (inc.status == "REGISTRADO" || inc.status == "EN_ATENCION") ErrorRed else SuccessGreen)
+                border = BorderStroke(1.dp, if (inc.status == "REGISTRADO" || inc.status == "EN_ATENCION") ErrorRed else SuccessGreen),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { selectedIncidentForDetail = inc }
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(inc.location, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         Text(inc.folio, color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
-                    Text(inc.rawTranscript, color = Color.LightGray, fontSize = 11.sp)
-                    Text("Estatus: ${inc.status} • Prioridad: ${inc.priority}", color = TextMuted, fontSize = 10.sp)
+                    Text(inc.rawTranscript.lines().firstOrNull() ?: inc.rawTranscript, color = Color.LightGray, fontSize = 11.sp, maxLines = 2)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Estatus: ${inc.status} • SLA: ${inc.targetSlaMinutes}m", color = CyanNeon, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text(inc.formattedDate, color = TextMuted, fontSize = 10.sp)
+                    }
                 }
             }
         }
+    }
+
+    if (showReportDialog) {
+        PradosIncidentReportDialog(
+            db = db,
+            condominiumId = condo.name,
+            initialLocation = if (condo == CondoTarget.PARAISO) "Caseta Cond. Paraíso" else "${condo.displayName} - Garita Principal",
+            onDismiss = { showReportDialog = false },
+            onIncidentCreated = {
+                showReportDialog = false
+            }
+        )
+    }
+
+    selectedIncidentForDetail?.let { inc ->
+        PradosIncidentDetailDialog(
+            incident = inc,
+            onDismiss = { selectedIncidentForDetail = null },
+            onAttend = {
+                scope.launch {
+                    com.example.data.incident.IncidentEngine.transitionToAttention(
+                        context = context,
+                        db = db,
+                        folio = inc.folio,
+                        operatorName = "Guardia ${condo.displayName}",
+                        operatorRole = "GUARDIA"
+                    )
+                    selectedIncidentForDetail = null
+                    Toast.makeText(context, "Incidencia ${inc.folio} en atención", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onResolve = {
+                scope.launch {
+                    com.example.data.incident.IncidentEngine.transitionToResolved(
+                        context = context,
+                        db = db,
+                        folio = inc.folio,
+                        resolutionNotes = "Resuelto en campo por personal de seguridad en turno.",
+                        operatorName = "Guardia ${condo.displayName}",
+                        operatorRole = "GUARDIA"
+                    )
+                    selectedIncidentForDetail = null
+                    Toast.makeText(context, "Incidencia ${inc.folio} resuelta", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
     }
 }
 
@@ -2600,63 +2587,23 @@ fun CasetaRondinesIsolatedSection(
         }
     }
 
-    // Modal de Incidencia Vinculada a la Ronda
+    // Modal de Incidencia Vinculada a la Ronda (Residencial Los Prados · Tiempo = Familia)
     if (showIncidentDialog && currentTour != null) {
         val cur = currentTour
-        AlertDialog(
-            onDismissRequest = { showIncidentDialog = false },
-            containerColor = NavyCard,
-            title = { Text("🚨 LEVANTAR INCIDENCIA EN RONDA", color = ErrorRed, fontWeight = FontWeight.Bold, fontSize = 13.sp) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Folio de Ronda: ${cur.tourFolio}", color = GoldPrimary, fontSize = 11.sp)
-                    OutlinedTextField(
-                        value = incidentDescInput,
-                        onValueChange = { incidentDescInput = it },
-                        label = { Text("Descripción de novedad o riesgo encontrado") },
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (incidentDescInput.isNotBlank()) {
-                            val incFolio = AlphaCoreEngine.generateUniqueFolio("MED")
-                            val incident = IncidentEntity(
-                                folio = incFolio,
-                                rawTranscript = incidentDescInput.trim(),
-                                category = IncidentCategory.SEGURIDAD_EMERGENCIA,
-                                priority = IncidentPriority.ALTA,
-                                location = "${condo.displayName} · Ronda Geo-Alpha",
-                                aiSummary = "Incidencia detectada durante la ronda ${cur.tourFolio}: ${incidentDescInput.trim()}",
-                                recommendedAction = "Atención inmediata por guardia en turno",
-                                reportedBy = cur.guardName,
-                                reportedByRole = "GUARDIA_RONDA",
-                                status = "REGISTRADO"
-                            )
-                            scope.launch {
-                                db.incidentDao().insertIncident(incident)
-                                if (trackerTour != null) {
-                                    GeoAlphaRoundTracker.linkIncident(incident)
-                                } else if (localTourOverride != null) {
-                                    localTourOverride = GeoAlphaTourEngine.linkIncident(localTourOverride!!, incident)
-                                }
-                                showIncidentDialog = false
-                                incidentDescInput = ""
-                                Toast.makeText(context, "🚨 Incidencia vinculada a la ronda (Folio $incFolio)", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed, contentColor = Color.White)
-                ) {
-                    Text("Registrar y Vincular", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showIncidentDialog = false }) {
-                    Text("Cancelar", color = TextMuted)
+        PradosIncidentReportDialog(
+            db = db,
+            condominiumId = condo.name,
+            initialLocation = "${condo.displayName} · Ronda Geo-Alpha [${cur.tourFolio}]",
+            onDismiss = { showIncidentDialog = false },
+            onIncidentCreated = { savedIncident ->
+                showIncidentDialog = false
+                scope.launch {
+                    if (trackerTour != null) {
+                        GeoAlphaRoundTracker.linkIncident(savedIncident)
+                    } else if (localTourOverride != null) {
+                        localTourOverride = GeoAlphaTourEngine.linkIncident(localTourOverride!!, savedIncident)
+                    }
+                    Toast.makeText(context, "🚨 Incidencia vinculada a la ronda Geo-Alpha (Folio ${savedIncident.folio})", Toast.LENGTH_SHORT).show()
                 }
             }
         )

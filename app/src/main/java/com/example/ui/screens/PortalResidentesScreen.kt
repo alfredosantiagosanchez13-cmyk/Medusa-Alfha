@@ -58,6 +58,7 @@ import com.example.scanner.PassType
 import com.example.ui.components.AmenityCalendarView
 import com.example.ui.components.MaintenancePaymentHistorySection
 import com.example.ui.components.PaymentReceiptDetailDialog
+import com.example.ui.components.PradosIncidentReportDialog
 import com.example.ui.components.ProximityGateControlCard
 import com.example.ui.components.ResidentFirebaseAuthBarrier
 import com.example.ui.components.SmartBookingAlerts
@@ -195,6 +196,7 @@ fun PortalResidentesScreen(
     var selectedQrForDetail by remember { mutableStateOf<QrPassRoomEntity?>(null) }
     var selectedPaymentForReceipt by remember { mutableStateOf<MaintenancePaymentEntity?>(null) }
     var preselectedBookingForPass by remember { mutableStateOf<AmenityBooking?>(null) }
+    var showResidentIncidentDialog by remember { mutableStateOf(false) }
 
     // Instancia de Repositorios Locales para Historial de Visitantes y Pagos de Cuotas
     val visitorPassRepository = remember(db) { VisitorPassRepository(db.visitorPassDao()) }
@@ -420,6 +422,7 @@ fun PortalResidentesScreen(
                             statement = residentFinancialStatement,
                             isOnline = isDeviceOnline,
                             payments = paymentHistory,
+                            onOpenReportIncident = { showResidentIncidentDialog = true },
                             onMakePaymentWeb = {
                                 Toast.makeText(context, "Pasarela de pago segura: Redirigiendo a SPEI/Tarjeta para ${residentFinancialStatement.unitNumber}...", Toast.LENGTH_SHORT).show()
                             },
@@ -557,6 +560,24 @@ fun PortalResidentesScreen(
             }
         )
     }
+
+    // Modal: Reporte de Novedad / Ruido Vecinal (Tiempo = Familia · Los Prados)
+    if (showResidentIncidentDialog) {
+        PradosIncidentReportDialog(
+            db = db,
+            condominiumId = condominiumId,
+            initialLocation = "Casa cercana a $assignedUnit",
+            onDismiss = { showResidentIncidentDialog = false },
+            onIncidentCreated = {
+                showResidentIncidentDialog = false
+                Toast.makeText(
+                    context,
+                    "✅ Reporte canalizado a Caseta y Administración para mediación comunitaria.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        )
+    }
 }
 
 // =========================================================================================
@@ -569,6 +590,7 @@ private fun ResidentFinanceTabContent(
     statement: ResidentUnitFinancialStatement,
     isOnline: Boolean,
     payments: List<MaintenancePaymentEntity>,
+    onOpenReportIncident: () -> Unit = {},
     onMakePaymentWeb: () -> Unit,
     onViewReceipt: (MaintenancePaymentEntity) -> Unit,
     onDownloadReceipt: (MaintenancePaymentEntity) -> Unit
@@ -878,6 +900,46 @@ private fun ResidentFinanceTabContent(
                 onViewReceipt = onViewReceipt,
                 onDownloadReceipt = onDownloadReceipt
             )
+        }
+
+        // Tarjeta de Convivencia y Reporte de Novedad Vecinal (Tiempo = Familia)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = NavySurface),
+                border = BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.4f))
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.Campaign, contentDescription = null, tint = GoldPrimary, modifier = Modifier.size(18.dp))
+                            Text("CONVIVENCIA & REGLAMENTO", color = GoldPrimary, fontSize = 11.sp, fontWeight = FontWeight.Black)
+                        }
+                        Text("Tiempo = Familia", color = SuccessGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Text(
+                        "¿Ruido excesivo, fiesta fuera de horario o vehículo obstruyendo en tu calle? Levanta un reporte con dictamen automático para mediación inmediata.",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                    Button(
+                        onClick = onOpenReportIncident,
+                        colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = NavyDark),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.ReportProblem, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Reportar Ruido o Novedad (Tiempo = Familia)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }
