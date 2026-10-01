@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Key
@@ -117,6 +118,7 @@ fun ActivationScreen(
     var showResidentAuthBarrier by remember { mutableStateOf(false) }
     var showAdminAuthModal by remember { mutableStateOf(false) }
     var showCasetaAuthModal by remember { mutableStateOf(false) }
+    var showFirebaseSetupHub by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
 
     // Escucha de éxito en la activación para propagar navegación
@@ -418,6 +420,45 @@ fun ActivationScreen(
                 )
             }
 
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Botón de Alta y Configuración Firebase & Cuentas Operativas
+            Button(
+                onClick = { showFirebaseSetupHub = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("btn_open_firebase_setup_hub"),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = GoldPrimary.copy(alpha = 0.18f),
+                    contentColor = GoldPrimary
+                ),
+                border = BorderStroke(1.2.dp, GoldPrimary)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CloudQueue,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = GoldPrimary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "ALTA FIREBASE & CUENTAS OPERATIVAS",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 12.sp,
+                        letterSpacing = 0.6.sp,
+                        color = GoldPrimary
+                    )
+                    Text(
+                        text = "Vincular Firestore y dar de alta perfiles oficiales",
+                        fontSize = 10.sp,
+                        color = TextMuted
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(26.dp))
 
             // Indicadores de Referencia de Perfiles RBAC
@@ -509,6 +550,19 @@ fun ActivationScreen(
                 }
             }
         }
+    }
+
+    // Modal de Alta y Configuración Firebase & Cuentas Operativas
+    if (showFirebaseSetupHub) {
+        com.example.ui.components.FirebaseSetupCenterHub(
+            db = db,
+            onDismiss = { showFirebaseSetupHub = false },
+            onSelectAccount = { selectedKey ->
+                inputKey = selectedKey
+                activationViewModel.validateActivationKey(selectedKey)
+                showFirebaseSetupHub = false
+            }
+        )
     }
 }
 

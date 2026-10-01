@@ -97,8 +97,10 @@ class MainActivity : FragmentActivity() {
             try {
                 val appDb = AppDatabase.getDatabase(applicationContext)
                 com.example.auth.AlfhaSecurityContext.seedInitialUsersIfEmpty(appDb)
+                com.example.data.firebase.FirebaseConfigHelper.initialize(applicationContext)
+                com.example.data.firebase.FirebaseConfigHelper.provisionOfficialAccounts(applicationContext, appDb)
                 OfflineSyncEngine.initializeAutoSync(applicationContext, appDb)
-                Log.i(TAG, "🔄 OfflineSyncEngine and AlfhaSecurityContext initialized safely on Dispatchers.IO")
+                Log.i(TAG, "🔄 OfflineSyncEngine, Firebase and AlfhaSecurityContext initialized safely on Dispatchers.IO")
             } catch (t: Throwable) {
                 Log.e(TAG, "Safe fallback: Failed to initialize OfflineSyncEngine: ${t.message}", t)
             }

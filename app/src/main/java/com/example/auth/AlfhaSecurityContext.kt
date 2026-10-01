@@ -47,6 +47,16 @@ object AlfhaSecurityContext {
         if (userDao.getUserCount() == 0) {
             val initialUsers = listOf(
                 AlfhaUserEntity(
+                    id = "USR-ALFHA-000",
+                    name = "Ing. Carlos Mendoza (Comando Central ALFHA)",
+                    email = "alfhaseguridad070@gmail.com",
+                    role = AlfhaRole.MAESTRO_ALFHA.name,
+                    unitOrDepartment = "Comando Central ALFHA",
+                    permissionsCsv = "",
+                    isActive = true,
+                    updatedBy = "INICIALIZACION_SISTEMA"
+                ),
+                AlfhaUserEntity(
                     id = "USR-ALFHA-001",
                     name = "Ing. Carlos Mendoza",
                     email = "carlos.mendoza@alfhaseguridad.com",
@@ -108,6 +118,22 @@ object AlfhaSecurityContext {
                 )
             )
             userDao.insertUsers(initialUsers)
+        } else {
+            // Asegurar que la cuenta oficial de Maestro Alfa exista siempre
+            if (userDao.getUserByEmail("alfhaseguridad070@gmail.com") == null) {
+                userDao.insertUser(
+                    AlfhaUserEntity(
+                        id = "USR-ALFHA-000",
+                        name = "Ing. Carlos Mendoza (Comando Central ALFHA)",
+                        email = "alfhaseguridad070@gmail.com",
+                        role = AlfhaRole.MAESTRO_ALFHA.name,
+                        unitOrDepartment = "Comando Central ALFHA",
+                        permissionsCsv = "",
+                        isActive = true,
+                        updatedBy = "INICIALIZACION_OFICIAL"
+                    )
+                )
+            }
         }
         com.example.data.resident.ResidentDirectoryEngine.seedInitialResidentsIfEmpty(db)
     }

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.CorporateFare
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.EventAvailable
@@ -162,7 +163,8 @@ enum class MasterAlphaRoleView(val title: String, val subtitle: String, val icon
     ADMIN("ADMINISTRACIÓN", "Gestión de Incidencias, Accesos y Rondas", Icons.Default.AdminPanelSettings),
     DIRECTIVA("MESA DIRECTIVA", "Gobierno, Indicadores y Cumplimiento", Icons.Default.CorporateFare),
     SMART_NOTIFICATIONS("NOTIFICACIONES", "Automatización por Eventos Reales y Cero Ruido", Icons.Default.Notifications),
-    AUDIT_TRAIL("CADENA AUDITORÍA", "Trazabilidad Inmutable SHA-256", Icons.Default.Timeline)
+    AUDIT_TRAIL("CADENA AUDITORÍA", "Trazabilidad Inmutable SHA-256", Icons.Default.Timeline),
+    FIREBASE_ACCOUNTS("NUBE FIRESTORE", "Conexión Firebase, Credenciales y Alta de Cuentas Operativas", Icons.Default.CloudQueue)
 }
 
 enum class TimePeriodFilter(val label: String) {
@@ -194,6 +196,7 @@ fun MasterPanelAlphaScreen(
     val alertDao = remember { db.operationalAlertDao() }
 
     var selectedView by remember { mutableStateOf(MasterAlphaRoleView.INTELLIGENCE) }
+    var showFirebaseSetupModal by remember { mutableStateOf(false) }
     var timeStats by remember { mutableStateOf<TimeReturnStats?>(null) }
     val currentUser by AlfhaSecurityContext.currentUser.collectAsState()
     val allUsers by db.alfhaUserDao().getAllUsersFlow().collectAsState(initial = emptyList())
@@ -301,6 +304,13 @@ fun MasterPanelAlphaScreen(
                     }
                 }
                 Spacer(modifier = Modifier.width(4.dp))
+                IconButton(
+                    onClick = { showFirebaseSetupModal = true },
+                    modifier = Modifier.testTag("open_firebase_hub_button")
+                ) {
+                    Icon(Icons.Default.CloudQueue, contentDescription = "Configurar Firebase", tint = CyanNeon)
+                }
+                Spacer(modifier = Modifier.width(2.dp))
                 IconButton(
                     onClick = { refreshStats() },
                     modifier = Modifier.testTag("refresh_master_stats_button")
@@ -578,6 +588,19 @@ fun MasterPanelAlphaScreen(
             MasterAlphaRoleView.AUDIT_TRAIL -> {
                 AuditTrailView(logs = auditLogs)
             }
+            MasterAlphaRoleView.FIREBASE_ACCOUNTS -> {
+                com.example.ui.components.FirebaseSetupCenterHub(
+                    db = db,
+                    onDismiss = { selectedView = MasterAlphaRoleView.INTELLIGENCE }
+                )
+            }
+        }
+
+        if (showFirebaseSetupModal) {
+            com.example.ui.components.FirebaseSetupCenterHub(
+                db = db,
+                onDismiss = { showFirebaseSetupModal = false }
+            )
         }
     }
 }
