@@ -63,6 +63,15 @@ sealed class Screen(
     )
 
     /**
+     * Pantalla de Inicio de Sesión de CondoSmart QR mediante Firebase Auth y Credential Manager.
+     */
+    data object CondoSmartQrLogin : Screen(
+        route = "condosmart_qr_login",
+        title = "Inicio de Sesión CondoSmart QR",
+        requiredRole = null
+    )
+
+    /**
      * Terminal Bloqueada por Intrusión: Destino forzado al detectar accesos
      * indebidos o violaciones a la jerarquía de roles RBAC.
      */
@@ -89,6 +98,7 @@ sealed class Screen(
                 route == GuardDashboard.route -> GuardDashboard
                 route == ResidentPortal.route -> ResidentPortal
                 route == ResidentVisitorQrGenerator.route -> ResidentVisitorQrGenerator
+                route == CondoSmartQrLogin.route -> CondoSmartQrLogin
                 else -> ActivationScreen
             }
         }

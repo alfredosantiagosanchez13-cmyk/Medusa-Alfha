@@ -1,0 +1,107 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // =========================================================================
+    // FUNCIONES AUXILIARES DE SEGURIDAD PARA STORAGE (MEDUSA ALFHA)
+    // =========================================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isMaestroAlfa() {
+      return isAuthenticated() && (
+        request.auth.token.email in ['alfhaseguridad070@gmail.com', 'carlos.mendoza@alfhaseguridad.com'] ||
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'MAESTRO_ALFHA'
+      );
+    }
+
+    function isAssignedToCondominium(condominiumId) {
+      return isMaestroAlfa() || (
+        isAuthenticated() && (
+          request.auth.token.condominiumId == condominiumId ||
+          request.auth.token.role in ['ADMINISTRACION', 'SUPERVISOR', 'GUARDIA']
+        )
+      );
+    }
+
+    function isAdministrador(condominiumId) {
+      return isMaestroAlfa() || (
+        isAssignedToCondominium(condominiumId) &&
+        request.auth.token.role in ['ADMINISTRACION', 'MESA_DIRECTIVA']
+      );
+    }
+
+    function isGuardiaOrSupervisor(condominiumId) {
+      return isAdministrador(condominiumId) || (
+        isAssignedToCondominium(condominiumId) &&
+        request.auth.token.role in ['GUARDIA', 'SUPERVISOR']
+      );
+    }
+
+    function isImageFile() {
+      return request.resource.contentType.matches('image/.*') &&
+             request.resource.size < 10 * 1024 * 1024; // Máximo 10MB
+    }
+
+    function isDocumentFile() {
+      return (request.resource.contentType.matches('image/.*') ||
+              request.resource.contentType == 'application/pdf') &&
+             request.resource.size < 15 * 1024 * 1024; // Máximo 15MB
+    }
+
+    // =========================================================================
+    // ESTRUCTURA PARTICIONADA: /condominiums/{condominiumId}/...
+    // =========================================================================
+
+    match /condominiums/{condominiumId} {
+
+      // 1. Fotografía de Perfil de Usuarios y Residentes
+      match /avatars/{userId}/{fileName} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow write: if isAdministrador(condominiumId) || (
+          isAuthenticated() && request.auth.uid == userId && isImageFile()
+        );
+      }
+
+      // 2. Fotografías y Evidencia de Incidencias Operativas
+      // Blindaje: Solo personal de guardia, supervisores y administración tienen acceso.
+      // Los residentes NO pueden navegar fotos de incidencias de otros residentes.
+      match /incidents/{incidentId}/{fileName} {
+        allow read: if isGuardiaOrSupervisor(condominiumId);
+        allow write: if isAssignedToCondominium(condominiumId) && isImageFile();
+      }
+
+      // 3. Capturas de Control de Acceso y Visitantes (Identificación / Placas)
+      match /visitor_logs/{folio}/{fileName} {
+        allow read: if isGuardiaOrSupervisor(condominiumId);
+        allow write: if isGuardiaOrSupervisor(condominiumId) && isImageFile();
+      }
+
+      // 4. Paquetería y Evidencias de Casillero
+      match /packages/{packageId}/{fileName} {
+        allow read: if isGuardiaOrSupervisor(condominiumId);
+        allow write: if isGuardiaOrSupervisor(condominiumId) && isImageFile();
+      }
+
+      // 5. Evidencias de Rondín y Supervisión Táctica (NFC / GPS)
+      match /patrol_evidence/{logId}/{fileName} {
+        allow read: if isGuardiaOrSupervisor(condominiumId);
+        allow write: if isGuardiaOrSupervisor(condominiumId) && isImageFile();
+      }
+
+      // 6. Reportes y Documentos Oficiales en PDF
+      match /reports/{reportId}/{fileName} {
+        allow read: if isAssignedToCondominium(condominiumId);
+        allow write: if isAdministrador(condominiumId) && isDocumentFile();
+      }
+    }
+
+    // Bloqueo total por defecto a rutas fuera del condominio
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

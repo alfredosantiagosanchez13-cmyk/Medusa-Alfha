@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Visibility
@@ -106,7 +107,8 @@ import com.example.ui.viewmodel.ActivationViewModel
 fun ActivationScreen(
     activationViewModel: ActivationViewModel,
     modifier: Modifier = Modifier,
-    onActivationSuccess: (MedusaRole) -> Unit = {}
+    onActivationSuccess: (MedusaRole) -> Unit = {},
+    onNavigateToCondoSmartQrLogin: () -> Unit = {}
 ) {
     val uiState by activationViewModel.uiState.collectAsState()
     val currentSession by activationViewModel.currentSession.collectAsState()
@@ -418,6 +420,45 @@ fun ActivationScreen(
                     fontSize = 12.sp,
                     letterSpacing = 0.6.sp
                 )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Botón de Inicio de Sesión CondoSmart QR (Firebase Auth + Credential Manager)
+            Button(
+                onClick = onNavigateToCondoSmartQrLogin,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("btn_condosmart_qr_login"),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CyanNeon.copy(alpha = 0.18f),
+                    contentColor = CyanNeon
+                ),
+                border = BorderStroke(1.2.dp, CyanNeon)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.QrCodeScanner,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = CyanNeon
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "ACCEDER A CONDOSMART QR",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 12.sp,
+                        letterSpacing = 0.6.sp,
+                        color = CyanNeon
+                    )
+                    Text(
+                        text = "Google Credential Manager + Firebase Auth",
+                        fontSize = 10.sp,
+                        color = TextMuted
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))

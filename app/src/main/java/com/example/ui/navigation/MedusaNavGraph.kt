@@ -158,6 +158,9 @@ fun MedusaNavGraph(
                             // Permanece en activación
                         }
                     }
+                },
+                onNavigateToCondoSmartQrLogin = {
+                    navController.navigate(Screen.CondoSmartQrLogin.route)
                 }
             )
         }
@@ -244,6 +247,24 @@ fun MedusaNavGraph(
                     }
                 )
             }
+        }
+
+        // =========================================================================
+        // 4.2 INICIO DE SESIÓN CONDOSMART QR (Firebase Auth + Credential Manager)
+        // =========================================================================
+        composable(route = Screen.CondoSmartQrLogin.route) {
+            com.example.ui.screens.CondoSmartQrLoginScreen(
+                activationViewModel = activationViewModel,
+                onNavigateBack = {
+                    navController.popBackStack()
+                },
+                onLoginSuccess = { resident ->
+                    navController.navigate(Screen.ResidentVisitorQrGenerator.route) {
+                        popUpTo(Screen.CondoSmartQrLogin.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            )
         }
 
         // =========================================================================

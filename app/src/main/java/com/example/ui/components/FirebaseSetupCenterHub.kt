@@ -678,57 +678,73 @@ private fun FirebaseAccountsProvisioningTabContent(
 
     val accountsList = listOf(
         OfficialAccountInfo(
+            id = "USR-ALFHA-000",
             title = "MAESTRO ALFA (SUPERADMIN)",
-            name = "Ing. Carlos Mendoza (Comando Central)",
+            name = "Ing. Carlos Mendoza (Comando Central ALFHA)",
             email = "alfhaseguridad070@gmail.com",
             role = "MAESTRO_ALFHA",
             unit = "Comando Central ALFHA",
-            accessKey = "MEDUSA-MASTER-2026",
+            status = "ACTIVO · NUBE",
             badgeColor = GoldPrimary
         ),
         OfficialAccountInfo(
+            id = "USR-ALFHA-001",
+            title = "MAESTRO ALFA (COMANDO)",
+            name = "Ing. Carlos Mendoza (Maestro Alfa)",
+            email = "carlos.mendoza@alfhaseguridad.com",
+            role = "MAESTRO_ALFHA",
+            unit = "Comando Central ALFHA",
+            status = "ACTIVO · NUBE",
+            badgeColor = GoldPrimary
+        ),
+        OfficialAccountInfo(
+            id = "USR-ALFHA-002",
             title = "MESA DIRECTIVA",
             name = "Lic. Roberto Garza (Presidente)",
             email = "mesa.directiva@condominio.com",
             role = "MESA_DIRECTIVA",
             unit = "Presidencia y Consejo Directivo",
-            accessKey = "MEDUSA-DIRECTIVA-2026",
+            status = "ACTIVO · NUBE",
             badgeColor = CyanNeon
         ),
         OfficialAccountInfo(
+            id = "USR-ALFHA-003",
             title = "ADMINISTRACIÓN GENERAL",
             name = "Lic. Patricia Ruiz",
             email = "administracion@condominio.com",
             role = "ADMINISTRACION",
             unit = "Oficina de Administración Los Prados",
-            accessKey = "MEDUSA-ADMIN-2026",
+            status = "ACTIVO · NUBE",
             badgeColor = Color(0xFF60A5FA)
         ),
         OfficialAccountInfo(
+            id = "USR-ALFHA-004",
             title = "SUPERVISIÓN TÁCTICA",
             name = "Comandante Roberto Gómez",
             email = "roberto.gomez@alfhaseguridad.com",
             role = "SUPERVISOR",
             unit = "Supervisión Operativa Táctica y Rondas",
-            accessKey = "MEDUSA-SUPERVISOR-2026",
+            status = "ACTIVO · NUBE",
             badgeColor = Color(0xFFA78BFA)
         ),
         OfficialAccountInfo(
+            id = "USR-ALFHA-005",
             title = "GUARDIA DE CASETA",
             name = "Oficial Juan Pérez",
             email = "caseta1@alfhaseguridad.com",
             role = "GUARDIA",
             unit = "Garita de Acceso Vehicular Los Prados",
-            accessKey = "MEDUSA-CASETA-2026",
+            status = "ACTIVO · NUBE",
             badgeColor = SuccessGreen
         ),
         OfficialAccountInfo(
+            id = "USR-ALFHA-006",
             title = "RESIDENTE TITULAR",
             name = "Familia Arismendi",
             email = "arismendi.residente@condominio.com",
             role = "RESIDENTE",
             unit = "Casa 54 · Circuito Los Álamos (Prados)",
-            accessKey = "MEDUSA-RESIDENTE-2026",
+            status = "ACTIVO · NUBE",
             badgeColor = WarningOrange
         )
     )
@@ -752,16 +768,16 @@ private fun FirebaseAccountsProvisioningTabContent(
             if (isProvisioning) {
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), color = NavyDark, strokeWidth = 2.dp)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("DANDO DE ALTA CUENTAS (ROOM + NUBE)...", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                Text("SINCRONIZANDO 7 CUENTAS (ROOM + NUBE)...", fontWeight = FontWeight.Bold, fontSize = 12.sp)
             } else {
                 Icon(imageVector = Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("DAR DE ALTA TODAS LAS CUENTAS OPERATIVAS", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                Text("SINCRONIZAR 7 CUENTAS OFICIALES EN FIRESTORE", fontWeight = FontWeight.Black, fontSize = 12.sp)
             }
         }
 
         Text(
-            text = "Haz clic en 'ACCEDER' en cualquier tarjeta para iniciar sesión inmediatamente con esa cuenta en la terminal:",
+            text = "Padrón auditado de 7 Cuentas Oficiales. Selecciona una cuenta para autenticar de forma segura:",
             color = TextMuted,
             fontSize = 11.sp,
             lineHeight = 15.sp
@@ -787,7 +803,7 @@ private fun FirebaseAccountsProvisioningTabContent(
                             border = BorderStroke(0.8.dp, account.badgeColor)
                         ) {
                             Text(
-                                text = account.title,
+                                text = "${account.id} · ${account.title}",
                                 color = account.badgeColor,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.sp,
@@ -796,13 +812,13 @@ private fun FirebaseAccountsProvisioningTabContent(
                         }
 
                         Button(
-                            onClick = { onSelectAccount(account.accessKey) },
+                            onClick = { onSelectAccount(account.email) },
                             modifier = Modifier.height(32.dp),
                             shape = RoundedCornerShape(6.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = CyanNeon.copy(alpha = 0.2f), contentColor = CyanNeon),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
                         ) {
-                            Text("ACCEDER", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                            Text("SELECCIONAR", fontWeight = FontWeight.Bold, fontSize = 10.sp)
                         }
                     }
 
@@ -810,7 +826,7 @@ private fun FirebaseAccountsProvisioningTabContent(
 
                     Text(text = account.name, color = TextWhite, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     Text(text = "Correo: ${account.email}", color = CyanNeon, fontSize = 11.sp)
-                    Text(text = "Ubicación: ${account.unit}", color = TextMuted, fontSize = 10.sp)
+                    Text(text = "Adscripción: ${account.unit}", color = TextMuted, fontSize = 10.sp)
 
                     Spacer(modifier = Modifier.height(4.dp))
 
@@ -818,21 +834,19 @@ private fun FirebaseAccountsProvisioningTabContent(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(text = "Llave Oficial:", color = TextMuted, fontSize = 10.sp)
+                        Text(text = "Estado:", color = TextMuted, fontSize = 10.sp)
                         Surface(
                             color = NavyDark,
                             shape = RoundedCornerShape(4.dp)
                         ) {
-                            SelectionContainer {
-                                Text(
-                                    text = account.accessKey,
-                                    color = GoldPrimary,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
+                            Text(
+                                text = account.status,
+                                color = SuccessGreen,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
                         }
                     }
                 }
@@ -842,12 +856,13 @@ private fun FirebaseAccountsProvisioningTabContent(
 }
 
 private data class OfficialAccountInfo(
+    val id: String,
     val title: String,
     val name: String,
     val email: String,
     val role: String,
     val unit: String,
-    val accessKey: String,
+    val status: String,
     val badgeColor: Color
 )
 

@@ -43,10 +43,14 @@ object FcmNotificationManager {
     private const val PREFS_NAME = "fcm_medusa_prefs"
     private const val KEY_FCM_TOKEN = "key_fcm_token"
     private const val KEY_SUBSCRIBED_UNIT = "key_subscribed_unit"
+    private const val KEY_REGISTRATION_LIMIT_REACHED = "key_fcm_limit_reached"
 
     const val TOPIC_SECURITY_EMERGENCY_ALERTS = "security_emergency_alerts"
 
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    @Volatile
+    private var isResilientMode: Boolean = false
 
     private val _fcmToken = MutableStateFlow<String?>(null)
     val fcmToken: StateFlow<String?> = _fcmToken.asStateFlow()
@@ -96,6 +100,8 @@ object FcmNotificationManager {
      */
     fun initialize(context: Context, currentUser: AlfhaUserEntity?, condominiumId: String) {
         val prefs = getPrefs(context)
+        isResilientMode = prefs.getBoolean(KEY_REGISTRATION_LIMIT_REACHED, false)
+
         val cachedToken = prefs.getString(KEY_FCM_TOKEN, null)
         if (!cachedToken.isNullOrBlank()) {
             _fcmToken.value = cachedToken
@@ -106,11 +112,7 @@ object FcmNotificationManager {
                 fetchAndRegisterFcmToken(context, currentUser, condominiumId)
             } catch (e: Exception) {
                 Log.w(TAG, "No se pudo obtener token FCM directo (modo offline o sin Google Play Services): ${e.message}")
-                if (_fcmToken.value == null) {
-                    val mockFallbackToken = "fcm_token_dev_${UUID.randomUUID().toString().take(12)}"
-                    _fcmToken.value = mockFallbackToken
-                    _fcmStatusMessage.value = "FCM Activo (Modo Local/Dev): Token asignado"
-                }
+                handleResilientRegistration(context, currentUser, condominiumId)
             }
 
             // Iniciar escucha reactiva en Firestore para notificaciones dirigidas a la unidad del residente
@@ -121,14 +123,34 @@ object FcmNotificationManager {
     }
 
     /**
-     * Obtiene el token FCM nativo de FirebaseMessaging y lo registra en Firestore
+     * Obtiene el token FCM nativo de FirebaseMessaging y lo registra en Firestore.
+     * En caso de TOO_MANY_REGISTRATIONS en Play Services, conmuta automáticamente a Modo Resiliente.
      */
     private fun fetchAndRegisterFcmToken(context: Context, currentUser: AlfhaUserEntity?, condominiumId: String) {
+        val prefs = getPrefs(context)
+        if (isResilientMode || prefs.getBoolean(KEY_REGISTRATION_LIMIT_REACHED, false)) {
+            isResilientMode = true
+            Log.i(TAG, "⚡ FCM: Modo Resiliente activo (Play Services con límite de registros alcanzado). Operando vía Cloud Firestore en tiempo real.")
+            handleResilientRegistration(context, currentUser, condominiumId)
+            return
+        }
+
         try {
             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
                 if (!task.isSuccessful) {
-                    Log.w(TAG, "FCM: Error al obtener registration token: ${task.exception?.message}")
-                    _fcmStatusMessage.value = "FCM: Token no disponible (offline)"
+                    val ex = task.exception
+                    val exMsg = ex?.message ?: ""
+                    val isTooMany = exMsg.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true) ||
+                            ex?.cause?.message?.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true) == true
+
+                    if (isTooMany) {
+                        Log.w(TAG, "⚠️ Google Play Services TOO_MANY_REGISTRATIONS detectado. Activando Modo Resiliente de Notificaciones para evitar reintentos fallidos.")
+                        isResilientMode = true
+                        prefs.edit().putBoolean(KEY_REGISTRATION_LIMIT_REACHED, true).apply()
+                    } else {
+                        Log.w(TAG, "FCM: Error al obtener registration token: $exMsg")
+                    }
+                    handleResilientRegistration(context, currentUser, condominiumId)
                     return@addOnCompleteListener
                 }
 
@@ -137,18 +159,37 @@ object FcmNotificationManager {
                 _fcmToken.value = token
                 _fcmStatusMessage.value = "FCM Conectado • Token Registrado"
 
-                val prefs = getPrefs(context)
                 prefs.edit().putString(KEY_FCM_TOKEN, token).apply()
 
                 // Si hay usuario y condominio, suscribirse a tópicos y registrar en Firestore
                 if (currentUser != null) {
-                    subscribeResidentTopics(currentUser, condominiumId)
+                    subscribeResidentTopics(context, currentUser, condominiumId)
                     saveTokenToFirestore(token, currentUser, condominiumId)
                 }
             }
         } catch (e: Throwable) {
+            val isTooMany = e.message?.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true) == true ||
+                    e.cause?.message?.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true) == true
+            if (isTooMany) {
+                isResilientMode = true
+                prefs.edit().putBoolean(KEY_REGISTRATION_LIMIT_REACHED, true).apply()
+            }
             Log.w(TAG, "FCM no disponible en el entorno actual: ${e.message}")
-            _fcmStatusMessage.value = "FCM: Operando en modo local seguro"
+            handleResilientRegistration(context, currentUser, condominiumId)
+        }
+    }
+
+    private fun handleResilientRegistration(context: Context, currentUser: AlfhaUserEntity?, condominiumId: String) {
+        val prefs = getPrefs(context)
+        var token = prefs.getString(KEY_FCM_TOKEN, null)
+        if (token.isNullOrBlank()) {
+            token = "fcm_resilient_${UUID.randomUUID().toString().take(12)}"
+            prefs.edit().putString(KEY_FCM_TOKEN, token).apply()
+        }
+        _fcmToken.value = token
+        _fcmStatusMessage.value = "FCM: Notificaciones directas en tiempo real vía Cloud Firestore (Modo Resiliente)"
+        if (currentUser != null) {
+            saveTokenToFirestore(token, currentUser, condominiumId)
         }
     }
 
@@ -167,12 +208,24 @@ object FcmNotificationManager {
      * - Tópico general del condominio: condo_{condoId}
      * - Tópico específico de la unidad: unit_{condoId}_{unitId}
      */
-    fun subscribeResidentTopics(user: AlfhaUserEntity, condominiumId: String) {
+    fun subscribeResidentTopics(context: Context, user: AlfhaUserEntity, condominiumId: String) {
+        if (isResilientMode) {
+            Log.d(TAG, "FCM: Suscripción a tópicos GCM omitida en modo resiliente.")
+            _isSubscribedToUnit.value = true
+            return
+        }
+
         try {
             val condoTopic = "condo_${sanitizeTopic(condominiumId)}"
             FirebaseMessaging.getInstance().subscribeToTopic(condoTopic).addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     Log.i(TAG, "✅ Suscrito a tópico FCM del condominio: $condoTopic")
+                } else {
+                    val exMsg = task.exception?.message ?: ""
+                    if (exMsg.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true)) {
+                        isResilientMode = true
+                        getPrefs(context).edit().putBoolean(KEY_REGISTRATION_LIMIT_REACHED, true).apply()
+                    }
                 }
             }
 
@@ -184,6 +237,12 @@ object FcmNotificationManager {
                         _isSubscribedToUnit.value = true
                         _fcmStatusMessage.value = "FCM Enlazado: Tópico $unitTopic"
                         Log.i(TAG, "✅ Suscrito con éxito al tópico FCM de la unidad: $unitTopic")
+                    } else {
+                        val exMsg = task.exception?.message ?: ""
+                        if (exMsg.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true)) {
+                            isResilientMode = true
+                            getPrefs(context).edit().putBoolean(KEY_REGISTRATION_LIMIT_REACHED, true).apply()
+                        }
                     }
                 }
             }
@@ -192,28 +251,49 @@ object FcmNotificationManager {
             if (user.alfhaRole.name == "GUARD" || user.alfhaRole.name == "GUARDIA" ||
                 user.alfhaRole.name == "SUPERVISOR" || user.alfhaRole.name == "ADMIN" || user.alfhaRole.name == "ADMINISTRADOR"
             ) {
-                subscribeSecurityTopics(condominiumId)
+                subscribeSecurityTopics(context, condominiumId)
             }
         } catch (e: Exception) {
             Log.w(TAG, "No se pudo suscribir a tópicos FCM: ${e.message}")
         }
     }
 
+    fun subscribeResidentTopics(user: AlfhaUserEntity, condominiumId: String) {
+        val app = com.example.MainApplication.instance
+        subscribeResidentTopics(app.applicationContext, user, condominiumId)
+    }
+
     /**
      * Suscribe el dispositivo del personal de seguridad a los tópicos de emergencia
      */
-    fun subscribeSecurityTopics(condominiumId: String) {
+    fun subscribeSecurityTopics(context: Context, condominiumId: String) {
+        if (isResilientMode) {
+            Log.d(TAG, "FCM: Suscripción a tópicos de seguridad omitida en modo resiliente.")
+            return
+        }
+
         try {
             val securityTopic = "condo_${sanitizeTopic(condominiumId)}_security"
             FirebaseMessaging.getInstance().subscribeToTopic(securityTopic).addOnCompleteListener { task ->
                 if (task.isSuccessful) {
                     Log.i(TAG, "🛡️ Suscrito a tópico FCM de Seguridad: $securityTopic")
+                } else {
+                    val exMsg = task.exception?.message ?: ""
+                    if (exMsg.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true)) {
+                        isResilientMode = true
+                        getPrefs(context).edit().putBoolean(KEY_REGISTRATION_LIMIT_REACHED, true).apply()
+                    }
                 }
             }
             FirebaseMessaging.getInstance().subscribeToTopic("security_emergency_alerts")
         } catch (e: Exception) {
             Log.w(TAG, "Error suscribiendo a tópicos de seguridad: ${e.message}")
         }
+    }
+
+    fun subscribeSecurityTopics(condominiumId: String) {
+        val app = com.example.MainApplication.instance
+        subscribeSecurityTopics(app.applicationContext, condominiumId)
     }
 
     /**
