@@ -34,7 +34,7 @@ data class VisitorUiState(
     val errorMessage: String? = null
 )
 
-class VisitorViewModel(
+class VisitorViewModel @JvmOverloads constructor(
     application: Application,
     private val repository: VisitorRepository = VisitorRepository(),
     private val alertRepository: ResidentAlertRepository = ResidentAlertRepository()

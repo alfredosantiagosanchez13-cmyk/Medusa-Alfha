@@ -11,7 +11,7 @@ import com.google.firebase.firestore.PersistentCacheSettings
 /**
  * Inicialización centralizada de la aplicación y servicios Firebase (Auth y Firestore).
  */
-class Application : android.app.Application() {
+class MedusaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()

@@ -63,7 +63,7 @@ data class NewBookingFormState(
     val isCheckingAvailability: Boolean = false
 )
 
-class AmenityBookingViewModel(
+class AmenityBookingViewModel @JvmOverloads constructor(
     application: Application,
     private val repository: AmenityBookingRepository = AmenityBookingRepository(),
     private val alertRepository: ResidentAlertRepository = ResidentAlertRepository()

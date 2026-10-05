@@ -15,21 +15,14 @@ import kotlinx.coroutines.tasks.await
  * Repositorio de Visitantes para Cloud Firestore con persistencia y actualización reactiva.
  */
 class VisitorRepository(
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
+    private val firestoreProvider: () -> FirebaseFirestore = { FirebaseFirestore.getInstance() }
 ) {
+    private val firestore by lazy { firestoreProvider() }
+
     companion object {
         private const val TAG = "VisitorRepository"
         const val DEFAULT_CONDOMINIUM_ID = "PRADOS_1"
         const val SUB_VISITOR_LOGS = "visitor_logs"
-    }
-
-    init {
-        try {
-            val settings = FirebaseFirestoreSettings.Builder()
-                .setPersistenceEnabled(true)
-                .build()
-            firestore.firestoreSettings = settings
-        } catch (_: Exception) {}
     }
 
     /**
