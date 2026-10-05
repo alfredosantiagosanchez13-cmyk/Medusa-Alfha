@@ -1,9 +1,11 @@
 package com.example.medusaalfha.ui.viewmodel
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.medusaalfha.data.model.VisitorEntry
 import com.example.medusaalfha.data.model.VisitorStatus
+import com.example.medusaalfha.data.repository.ResidentAlertRepository
 import com.example.medusaalfha.data.repository.VisitorRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,8 +35,10 @@ data class VisitorUiState(
 )
 
 class VisitorViewModel(
-    private val repository: VisitorRepository = VisitorRepository()
-) : ViewModel() {
+    application: Application,
+    private val repository: VisitorRepository = VisitorRepository(),
+    private val alertRepository: ResidentAlertRepository = ResidentAlertRepository()
+) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(VisitorUiState())
     val uiState: StateFlow<VisitorUiState> = _uiState.asStateFlow()
@@ -138,6 +142,16 @@ class VisitorViewModel(
                 notes = "Ingreso registrado desde terminal táctica"
             )
             val res = repository.registerVisitorCheckIn(newEntry)
+
+            // Emitir Alerta en Tiempo Real y Notificación al Residente
+            alertRepository.dispatchVisitorArrivalAlert(
+                context = getApplication(),
+                visitorName = newEntry.visitorName,
+                destinationHouse = newEntry.destinationHouse,
+                folio = generatedFolio,
+                vehiclePlate = newEntry.vehiclePlate
+            )
+
             val updatedAll = listOf(newEntry) + _uiState.value.allEntries.filter { it.folio != newEntry.folio }
             val filtered = applyFilters(updatedAll, _uiState.value.searchQuery, _uiState.value.activeFilter)
             _uiState.value = _uiState.value.copy(
