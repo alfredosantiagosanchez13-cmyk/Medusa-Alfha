@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item
-        android:width="70dp"
-        android:height="70dp"
-        android:drawable="@drawable/img_app_icon"
+        android:width="66dp"
+        android:height="66dp"
+        android:drawable="@drawable/medusa_app_icon_1791173154790"
         android:gravity="center" />
 </layer-list>
