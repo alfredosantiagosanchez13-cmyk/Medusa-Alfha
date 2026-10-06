@@ -32,34 +32,40 @@ class VisitorRepository(
         condominiumId: String = DEFAULT_CONDOMINIUM_ID,
         limit: Long = 30
     ): Flow<List<VisitorEntry>> = callbackFlow {
-        val collectionRef = firestore.collection("condominiums")
-            .document(condominiumId)
-            .collection(SUB_VISITOR_LOGS)
-            .orderBy("checkInTimestamp", Query.Direction.DESCENDING)
-            .limit(limit)
+        var listenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+        try {
+            val collectionRef = firestore.collection("condominiums")
+                .document(condominiumId)
+                .collection(SUB_VISITOR_LOGS)
+                .orderBy("checkInTimestamp", Query.Direction.DESCENDING)
+                .limit(limit)
 
-        val listenerRegistration = collectionRef.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                Log.w(TAG, "Error escuchando visitor_logs de Firestore: ${error.message}")
-                // Si falla o no hay conexión, emitir lista con fallback de contingencia
-                trySend(getFallbackSampleEntries())
-                return@addSnapshotListener
-            }
-
-            if (snapshot != null && !snapshot.isEmpty) {
-                val list = snapshot.documents.mapNotNull { doc ->
-                    val data = doc.data ?: return@mapNotNull null
-                    VisitorEntry.fromMap(data, doc.id)
+            listenerRegistration = collectionRef.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Error escuchando visitor_logs de Firestore: ${error.message}")
+                    // Si falla o no hay conexión, emitir lista con fallback de contingencia
+                    trySend(getFallbackSampleEntries())
+                    return@addSnapshotListener
                 }
-                trySend(list)
-            } else {
-                // Colección vacía: se emite lista vacía para permitir sembrado inicial
-                trySend(emptyList())
+
+                if (snapshot != null && !snapshot.isEmpty) {
+                    val list = snapshot.documents.mapNotNull { doc ->
+                        val data = doc.data ?: return@mapNotNull null
+                        VisitorEntry.fromMap(data, doc.id)
+                    }
+                    trySend(list)
+                } else {
+                    // Colección vacía: se emite lista vacía para permitir sembrado inicial
+                    trySend(emptyList())
+                }
             }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Excepción registrando listener de visitor_logs: ${t.message}")
+            trySend(getFallbackSampleEntries())
         }
 
         awaitClose {
-            listenerRegistration.remove()
+            listenerRegistration?.remove()
         }
     }
 

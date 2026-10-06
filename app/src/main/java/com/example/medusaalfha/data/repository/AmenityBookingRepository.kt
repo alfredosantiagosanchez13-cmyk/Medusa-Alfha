@@ -43,36 +43,45 @@ class AmenityBookingRepository(
     fun getBookingsFlow(
         condominiumId: String = DEFAULT_CONDOMINIUM_ID
     ): Flow<List<AmenityBooking>> = callbackFlow {
-        val collectionRef = firestore.collection("condominiums")
-            .document(condominiumId)
-            .collection(SUB_BOOKINGS)
-            .orderBy("dateString", Query.Direction.ASCENDING)
+        // Emitir datos en memoria de inmediato
+        trySend(inMemoryBookings.toList())
 
-        val listenerRegistration = collectionRef.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                Log.w(TAG, "Error escuchando amenity_bookings de Firestore: ${error.message}")
-                trySend(inMemoryBookings.toList())
-                return@addSnapshotListener
-            }
+        var listenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+        try {
+            val collectionRef = firestore.collection("condominiums")
+                .document(condominiumId)
+                .collection(SUB_BOOKINGS)
+                .orderBy("dateString", Query.Direction.ASCENDING)
 
-            if (snapshot != null && !snapshot.isEmpty) {
-                val cloudList = snapshot.documents.mapNotNull { doc ->
-                    doc.data?.let { AmenityBooking.fromMap(it) }
+            listenerRegistration = collectionRef.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Error escuchando amenity_bookings de Firestore: ${error.message}")
+                    trySend(inMemoryBookings.toList())
+                    return@addSnapshotListener
                 }
-                // Actualizar caché local
-                synchronized(inMemoryBookings) {
-                    inMemoryBookings.clear()
-                    inMemoryBookings.addAll(cloudList)
+
+                if (snapshot != null && !snapshot.isEmpty) {
+                    val cloudList = snapshot.documents.mapNotNull { doc ->
+                        doc.data?.let { AmenityBooking.fromMap(it) }
+                    }
+                    // Actualizar caché local
+                    synchronized(inMemoryBookings) {
+                        inMemoryBookings.clear()
+                        inMemoryBookings.addAll(cloudList)
+                    }
+                    trySend(cloudList)
+                } else {
+                    // Si la colección de Firestore está vacía, emitir los de prueba y permitir seeding
+                    trySend(inMemoryBookings.toList())
                 }
-                trySend(cloudList)
-            } else {
-                // Si la colección de Firestore está vacía, emitir los de prueba y permitir seeding
-                trySend(inMemoryBookings.toList())
             }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Excepción al registrar listener de amenity_bookings: ${t.message}")
+            trySend(inMemoryBookings.toList())
         }
 
         awaitClose {
-            listenerRegistration.remove()
+            listenerRegistration?.remove()
         }
     }
 

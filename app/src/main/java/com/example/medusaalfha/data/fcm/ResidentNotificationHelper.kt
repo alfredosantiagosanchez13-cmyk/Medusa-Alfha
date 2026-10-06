@@ -54,15 +54,8 @@ object ResidentNotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val iconRes = when (alert.type) {
-            AlertType.VISITOR_ARRIVAL -> R.drawable.ic_launcher_foreground
-            AlertType.BOOKING_CONFIRMED -> R.drawable.ic_launcher_foreground
-            AlertType.BOOKING_CANCELLED -> R.drawable.ic_launcher_foreground
-            else -> R.drawable.ic_launcher_foreground
-        }
-
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(iconRes)
+            .setSmallIcon(R.drawable.ic_stat_notification)
             .setContentTitle(alert.title)
             .setContentText(alert.message)
             .setStyle(NotificationCompat.BigTextStyle().bigText("${alert.message}\nDestino: ${alert.targetHouse}"))
@@ -72,9 +65,13 @@ object ResidentNotificationHelper {
             .setContentIntent(pendingIntent)
             .build()
 
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(alert.id.hashCode(), notification)
-        Log.d(TAG, "Notificación mostrada en dispositivo: ${alert.title}")
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(alert.id.hashCode(), notification)
+            Log.d(TAG, "Notificación mostrada en dispositivo: ${alert.title}")
+        } catch (t: Throwable) {
+            Log.w(TAG, "No se pudo emitir la notificación: ${t.message}")
+        }
     }
 
     /**

@@ -36,34 +36,43 @@ class ResidentAlertRepository(
      * Flujo de alertas en tiempo real desde Firestore.
      */
     fun getAlertsFlow(condominiumId: String = DEFAULT_CONDOMINIUM_ID): Flow<List<ResidentAlert>> = callbackFlow {
-        val collectionRef = firestore.collection("condominiums")
-            .document(condominiumId)
-            .collection(SUB_ALERTS)
-            .orderBy("timestampMillis", Query.Direction.DESCENDING)
-            .limit(40)
+        // Emitir estado en memoria de forma inmediata
+        trySend(inMemoryAlerts.toList())
 
-        val listener = collectionRef.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                Log.w(TAG, "Error leyendo alertas de Firestore: ${error.message}")
-                trySend(inMemoryAlerts.toList())
-                return@addSnapshotListener
-            }
+        var listener: com.google.firebase.firestore.ListenerRegistration? = null
+        try {
+            val collectionRef = firestore.collection("condominiums")
+                .document(condominiumId)
+                .collection(SUB_ALERTS)
+                .orderBy("timestampMillis", Query.Direction.DESCENDING)
+                .limit(40)
 
-            if (snapshot != null && !snapshot.isEmpty) {
-                val cloudList = snapshot.documents.mapNotNull { doc ->
-                    doc.data?.let { ResidentAlert.fromMap(it) }
+            listener = collectionRef.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w(TAG, "Error leyendo alertas de Firestore: ${error.message}")
+                    trySend(inMemoryAlerts.toList())
+                    return@addSnapshotListener
                 }
-                synchronized(inMemoryAlerts) {
-                    inMemoryAlerts.clear()
-                    inMemoryAlerts.addAll(cloudList)
+
+                if (snapshot != null && !snapshot.isEmpty) {
+                    val cloudList = snapshot.documents.mapNotNull { doc ->
+                        doc.data?.let { ResidentAlert.fromMap(it) }
+                    }
+                    synchronized(inMemoryAlerts) {
+                        inMemoryAlerts.clear()
+                        inMemoryAlerts.addAll(cloudList)
+                    }
+                    trySend(cloudList)
+                } else {
+                    trySend(inMemoryAlerts.toList())
                 }
-                trySend(cloudList)
-            } else {
-                trySend(inMemoryAlerts.toList())
             }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Excepción al registrar listener de alertas: ${t.message}")
+            trySend(inMemoryAlerts.toList())
         }
 
-        awaitClose { listener.remove() }
+        awaitClose { listener?.remove() }
     }
 
     /**
