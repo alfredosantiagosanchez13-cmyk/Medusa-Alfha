@@ -12,6 +12,7 @@ import com.google.firebase.messaging.RemoteMessage
  */
 class MedusaFirebaseMessagingService : FirebaseMessagingService() {
 
+    @Suppress("DEPRECATION")
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         Log.d(TAG, "Nuevo FCM Token de dispositivo registrado: $token")

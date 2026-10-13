@@ -22,7 +22,7 @@ class ResidentFcmAlertTest {
             isRead = false
         )
 
-        val map = alert.toMap()
+        val map = alert.toMap().filterValues { it != null } as Map<String, Any>
         assertEquals("ALT-VIS-100", map["id"])
         assertEquals("VISITOR_ARRIVAL", map["type"])
         assertEquals("Casa 54 · Circuito Los Álamos", map["targetHouse"])
@@ -54,7 +54,7 @@ class ResidentFcmAlertTest {
             isRead = true
         )
 
-        val map = alert.toMap()
+        val map = alert.toMap().filterValues { it != null } as Map<String, Any>
         val deserialized = ResidentAlert.fromMap(map)
         assertEquals(AlertType.BOOKING_CONFIRMED, deserialized.type)
         assertEquals("Palapa & Alberca", deserialized.metadata["amenityName"])

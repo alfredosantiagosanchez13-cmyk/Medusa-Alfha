@@ -1,7 +1,6 @@
 package com.example.medusaalfha.ui.viewmodel
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.medusaalfha.data.model.AmenityArea
 import com.example.medusaalfha.data.model.AmenityBooking
@@ -12,9 +11,6 @@ import com.example.medusaalfha.data.repository.ResidentAlertRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -22,12 +18,12 @@ import java.util.Date
 import java.util.Locale
 
 data class CalendarDay(
-    val dateString: String,      // YYYY-MM-DD
-    val dayOfWeekLetter: String, // L, M, M, J, V, S, D
-    val dayOfMonthNumber: String,// 05, 06, etc.
+    val dateString: String,
+    val dayOfMonthNumber: Int,
+    val dayOfWeekLetter: String,
     val isToday: Boolean,
     val isSelected: Boolean,
-    val hasBookings: Boolean
+    val hasBookings: Boolean = false
 )
 
 data class TimeSlotSlot(
@@ -37,37 +33,39 @@ data class TimeSlotSlot(
     val activeBooking: AmenityBooking? = null
 )
 
+data class NewBookingFormState(
+    val amenityId: String = "palapa_alberca",
+    val dateString: String = "",
+    val startHour: Int = 10,
+    val durationHours: Int = 3,
+    val guestCount: Int = 10,
+    val residentName: String = "Familia González",
+    val residentHouse: String = "Casa 54 · Cto. Álamos",
+    val notes: String = "",
+    val isCheckingAvailability: Boolean = false,
+    val conflictBooking: AmenityBooking? = null
+) {
+    val endHour: Int get() = startHour + durationHours
+}
+
 data class BookingUiState(
-    val isLoading: Boolean = false,
-    val allBookings: List<AmenityBooking> = emptyList(),
-    val selectedDateString: String = AmenityBooking.todayDateString(),
-    val selectedAmenityId: String? = null, // null = Todas
+    val selectedAmenityId: String = "palapa_alberca",
+    val selectedDateString: String = "",
     val calendarDays: List<CalendarDay> = emptyList(),
+    val allBookings: List<AmenityBooking> = emptyList(),
     val filteredBookings: List<AmenityBooking> = emptyList(),
     val timeSlots: List<TimeSlotSlot> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val successNotice: String? = null,
     val isAddDialogOpen: Boolean = false,
-    val selectedDetailBooking: AmenityBooking? = null,
-    val userNotice: String? = null,
-    val errorMessage: String? = null
+    val selectedDetailBooking: AmenityBooking? = null
 )
 
-data class NewBookingFormState(
-    val amenityId: String = "ALBERCA_PALAPA",
-    val residentName: String = "",
-    val residentHouse: String = "",
-    val startHour: Int = 11,
-    val endHour: Int = 14,
-    val guestCount: Int = 6,
-    val notes: String = "",
-    val conflictBooking: AmenityBooking? = null,
-    val isCheckingAvailability: Boolean = false
-)
-
-class AmenityBookingViewModel @JvmOverloads constructor(
-    application: Application,
+class AmenityBookingViewModel(
     private val repository: AmenityBookingRepository = AmenityBookingRepository(),
     private val alertRepository: ResidentAlertRepository = ResidentAlertRepository()
-) : AndroidViewModel(application) {
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BookingUiState())
     val uiState: StateFlow<BookingUiState> = _uiState.asStateFlow()
@@ -75,85 +73,64 @@ class AmenityBookingViewModel @JvmOverloads constructor(
     private val _formState = MutableStateFlow(NewBookingFormState())
     val formState: StateFlow<NewBookingFormState> = _formState.asStateFlow()
 
+    private val todayString: String
+
     init {
-        val todayStr = AmenityBooking.todayDateString()
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        todayString = sdf.format(Date())
+
         _uiState.value = _uiState.value.copy(
-            selectedDateString = todayStr,
-            calendarDays = generateCalendarDays(todayStr, emptyList())
+            selectedDateString = todayString,
+            calendarDays = generateCalendarDays(todayString)
         )
+        _formState.value = _formState.value.copy(dateString = todayString)
+
         listenToBookings()
     }
 
     private fun listenToBookings() {
-        _uiState.value = _uiState.value.copy(isLoading = true)
-
-        repository.getBookingsFlow()
-            .onEach { bookingsList ->
-                val activeDate = _uiState.value.selectedDateString
-                val amenityFilter = _uiState.value.selectedAmenityId
-                val filtered = filterBookings(bookingsList, activeDate, amenityFilter)
-                val days = generateCalendarDays(activeDate, bookingsList)
-                val slots = generateTimeSlots(activeDate, amenityFilter, bookingsList)
-
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            repository.getBookingsFlow().collect { bookings ->
                 _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    allBookings = bookingsList,
-                    calendarDays = days,
-                    filteredBookings = filtered,
-                    timeSlots = slots,
-                    errorMessage = null
+                    allBookings = bookings,
+                    isLoading = false
                 )
-                // Actualizar validación de traslape en el formulario si está abierto
-                revalidateFormConflict(bookingsList)
+                filterBookings()
             }
-            .catch { e ->
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    errorMessage = "Sincronización en contingencia local: ${e.message}"
-                )
-            }
-            .launchIn(viewModelScope)
+        }
     }
 
-    fun onSelectDate(dateString: String) {
-        val days = generateCalendarDays(dateString, _uiState.value.allBookings)
-        val filtered = filterBookings(_uiState.value.allBookings, dateString, _uiState.value.selectedAmenityId)
-        val slots = generateTimeSlots(dateString, _uiState.value.selectedAmenityId, _uiState.value.allBookings)
+    fun onAmenitySelected(amenityId: String) {
+        _uiState.value = _uiState.value.copy(selectedAmenityId = amenityId)
+        _formState.value = _formState.value.copy(amenityId = amenityId)
+        filterBookings()
+    }
 
+    fun onDateSelected(dateString: String) {
         _uiState.value = _uiState.value.copy(
             selectedDateString = dateString,
-            calendarDays = days,
-            filteredBookings = filtered,
-            timeSlots = slots
+            calendarDays = generateCalendarDays(dateString)
         )
-        revalidateFormConflict(_uiState.value.allBookings)
+        _formState.value = _formState.value.copy(dateString = dateString)
+        filterBookings()
     }
 
-    fun onFilterAmenity(amenityId: String?) {
-        val filtered = filterBookings(_uiState.value.allBookings, _uiState.value.selectedDateString, amenityId)
-        val slots = generateTimeSlots(_uiState.value.selectedDateString, amenityId, _uiState.value.allBookings)
+    fun onSelectTimeSlot(hour: Int) {
+        val area = AmenityCatalog.getAreaById(_uiState.value.selectedAmenityId)
+        val maxHour = area?.endHour ?: 22
+        val duration = if (hour + 2 <= maxHour) 2 else (maxHour - hour).coerceAtLeast(1)
 
-        _uiState.value = _uiState.value.copy(
-            selectedAmenityId = amenityId,
-            filteredBookings = filtered,
-            timeSlots = slots
+        _formState.value = _formState.value.copy(
+            startHour = hour,
+            durationHours = duration
         )
+        revalidateFormConflict()
+        _uiState.value = _uiState.value.copy(isAddDialogOpen = true)
     }
 
-    fun onOpenAddDialog(initialHour: Int? = null) {
-        val preferredHour = initialHour ?: 10
-        val targetAmenity = _uiState.value.selectedAmenityId ?: "ALBERCA_PALAPA"
-        val initialForm = NewBookingFormState(
-            amenityId = targetAmenity,
-            residentName = "",
-            residentHouse = "Casa 54 · Circuito Los Álamos",
-            startHour = preferredHour,
-            endHour = (preferredHour + 2).coerceAtMost(22),
-            guestCount = 4,
-            notes = ""
-        )
-        _formState.value = initialForm
-        revalidateFormConflict(_uiState.value.allBookings)
+    fun onOpenAddDialog() {
+        revalidateFormConflict()
         _uiState.value = _uiState.value.copy(isAddDialogOpen = true)
     }
 
@@ -170,15 +147,23 @@ class AmenityBookingViewModel @JvmOverloads constructor(
     }
 
     fun onFormAmenityChanged(amenityId: String) {
-        val area = AmenityCatalog.findById(amenityId)
-        val clampedStart = _formState.value.startHour.coerceIn(area.openHour, area.closeHour - 1)
-        val clampedEnd = (clampedStart + 2).coerceIn(clampedStart + 1, area.closeHour)
-        _formState.value = _formState.value.copy(
-            amenityId = amenityId,
-            startHour = clampedStart,
-            endHour = clampedEnd
-        )
-        revalidateFormConflict(_uiState.value.allBookings)
+        _formState.value = _formState.value.copy(amenityId = amenityId)
+        revalidateFormConflict()
+    }
+
+    fun onFormDateChanged(dateStr: String) {
+        _formState.value = _formState.value.copy(dateString = dateStr)
+        revalidateFormConflict()
+    }
+
+    fun onFormStartHourChanged(hour: Int) {
+        _formState.value = _formState.value.copy(startHour = hour)
+        revalidateFormConflict()
+    }
+
+    fun onFormDurationChanged(duration: Int) {
+        _formState.value = _formState.value.copy(durationHours = duration)
+        revalidateFormConflict()
     }
 
     fun onFormResidentNameChanged(name: String) {
@@ -189,87 +174,77 @@ class AmenityBookingViewModel @JvmOverloads constructor(
         _formState.value = _formState.value.copy(residentHouse = house)
     }
 
-    fun onFormStartHourChanged(startHour: Int) {
-        val newEnd = if (startHour >= _formState.value.endHour) (startHour + 1).coerceAtMost(23) else _formState.value.endHour
-        _formState.value = _formState.value.copy(startHour = startHour, endHour = newEnd)
-        revalidateFormConflict(_uiState.value.allBookings)
-    }
-
-    fun onFormEndHourChanged(endHour: Int) {
-        val newStart = if (endHour <= _formState.value.startHour) (endHour - 1).coerceAtLeast(6) else _formState.value.startHour
-        _formState.value = _formState.value.copy(startHour = newStart, endHour = endHour)
-        revalidateFormConflict(_uiState.value.allBookings)
-    }
-
-    fun onFormGuestCountChanged(guests: Int) {
-        _formState.value = _formState.value.copy(guestCount = guests)
+    fun onFormGuestCountChanged(count: Int) {
+        _formState.value = _formState.value.copy(guestCount = count)
     }
 
     fun onFormNotesChanged(notes: String) {
         _formState.value = _formState.value.copy(notes = notes)
     }
 
-    private fun revalidateFormConflict(bookings: List<AmenityBooking>) {
-        val form = _formState.value
-        val area = AmenityCatalog.findById(form.amenityId)
-        val candidate = AmenityBooking(
-            id = "TEMP_VALIDATION",
-            amenityId = form.amenityId,
-            amenityName = area.name,
-            dateString = _uiState.value.selectedDateString,
-            startTimeHour = form.startHour,
-            endTimeHour = form.endHour,
-            status = BookingStatus.CONFIRMADA
-        )
-        val (isAvailable, conflict) = repository.checkAvailability(candidate, bookings)
-        _formState.value = form.copy(conflictBooking = if (!isAvailable) conflict else null)
+    fun onQuickDurationSelected(hours: Int) {
+        _formState.value = _formState.value.copy(durationHours = hours)
+        revalidateFormConflict()
     }
 
-    fun submitBooking() {
-        val form = _formState.value
-        if (form.conflictBooking != null) {
-            _uiState.value = _uiState.value.copy(
-                errorMessage = "No se puede confirmar: el horario se traslapa con la reserva de ${form.conflictBooking.residentHouse}."
-            )
-            return
-        }
+    fun clearNotice() {
+        _uiState.value = _uiState.value.copy(errorMessage = null, successNotice = null)
+    }
 
-        val area = AmenityCatalog.findById(form.amenityId)
+    private fun revalidateFormConflict() {
+        val f = _formState.value
+        val conflict = repository.checkSlotAvailability(
+            amenityId = f.amenityId,
+            dateString = f.dateString,
+            startHour = f.startHour,
+            endHour = f.endHour
+        )
+        _formState.value = f.copy(conflictBooking = conflict)
+    }
+
+    fun submitBooking(context: android.content.Context) {
+        val form = _formState.value
+        val area = AmenityCatalog.getAreaById(form.amenityId) ?: return
+
         val newBooking = AmenityBooking(
-            id = "BOOK-${System.currentTimeMillis() % 100000}",
+            id = "BOK-${System.currentTimeMillis() % 100000}",
             amenityId = form.amenityId,
             amenityName = area.name,
-            residentName = form.residentName.ifBlank { "Residente Titular" },
-            residentHouse = form.residentHouse.ifBlank { "Casa 54 · Circuito Los Álamos" },
-            dateString = _uiState.value.selectedDateString,
+            residentName = form.residentName.trim(),
+            residentHouse = form.residentHouse.trim(),
+            dateString = form.dateString,
             startTimeHour = form.startHour,
             endTimeHour = form.endHour,
             guestCount = form.guestCount,
-            status = BookingStatus.CONFIRMADA,
-            notes = form.notes.ifBlank { "Reserva registrada desde panel táctico" },
-            createdAtMillis = System.currentTimeMillis()
+            status = BookingStatus.CONFIRMED,
+            notes = form.notes.trim()
         )
 
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
             val result = repository.createBooking(newBooking)
             if (result.isSuccess) {
-                // Notificar en tiempo real al dispositivo del residente y seguridad (FCM)
-                alertRepository.dispatchBookingConfirmedAlert(
-                    context = getApplication(),
-                    amenityName = newBooking.amenityName,
-                    destinationHouse = newBooking.residentHouse,
-                    dateString = newBooking.dateString,
-                    timeRange = newBooking.formattedTimeRange(),
-                    bookingId = newBooking.id
-                )
+                // Notificar alerta al residente
+                try {
+                    alertRepository.dispatchBookingConfirmedAlert(
+                        context = context,
+                        amenityName = area.name,
+                        destinationHouse = newBooking.residentHouse,
+                        dateString = newBooking.dateString,
+                        timeRange = newBooking.formattedTimeRange,
+                        bookingId = newBooking.id
+                    )
+                } catch (_: Exception) {}
 
                 _uiState.value = _uiState.value.copy(
+                    isLoading = false,
                     isAddDialogOpen = false,
-                    userNotice = "¡Reserva confirmada con éxito para ${area.badgeLabel} (${newBooking.formattedTimeRange()})!"
+                    successNotice = "¡Reserva confirmada exitosamente para ${area.name}!"
                 )
             } else {
                 _uiState.value = _uiState.value.copy(
-                    errorMessage = result.exceptionOrNull()?.message ?: "Error al registrar reserva."
+                    isLoading = false,
+                    errorMessage = result.exceptionOrNull()?.message ?: "Error al reservar horario."
                 )
             }
         }
@@ -277,109 +252,79 @@ class AmenityBookingViewModel @JvmOverloads constructor(
 
     fun cancelBooking(bookingId: String) {
         viewModelScope.launch {
-            val result = repository.cancelBooking(bookingId)
-            if (result.isSuccess) {
-                _uiState.value = _uiState.value.copy(
-                    selectedDetailBooking = null,
-                    userNotice = "Reserva cancelada correctamente. El horario ha quedado liberado."
-                )
-            } else {
-                _uiState.value = _uiState.value.copy(
-                    errorMessage = "No se pudo cancelar: ${result.exceptionOrNull()?.message}"
-                )
-            }
+            repository.cancelBooking(bookingId)
+            _uiState.value = _uiState.value.copy(
+                selectedDetailBooking = null,
+                successNotice = "Reserva cancelada."
+            )
         }
     }
 
     fun seedSampleBookings() {
         viewModelScope.launch {
-            val result = repository.seedSampleBookings()
-            if (result.isSuccess) {
-                _uiState.value = _uiState.value.copy(
-                    userNotice = "Se sincronizaron ${result.getOrNull()} reservas de muestra con Cloud Firestore."
-                )
-            } else {
-                _uiState.value = _uiState.value.copy(
-                    userNotice = "Reservas activas en almacenamiento local."
-                )
-            }
+            repository.seedInitialBookingsIfEmpty()
         }
     }
 
-    fun clearNotice() {
-        _uiState.value = _uiState.value.copy(userNotice = null, errorMessage = null)
-    }
+    private fun filterBookings() {
+        val state = _uiState.value
+        val amenityId = state.selectedAmenityId
+        val date = state.selectedDateString
 
-    // Helper functions
-    private fun filterBookings(
-        all: List<AmenityBooking>,
-        dateStr: String,
-        amenityId: String?
-    ): List<AmenityBooking> {
-        return all.filter { booking ->
-            val dateMatches = booking.dateString == dateStr
-            val amenityMatches = amenityId == null || booking.amenityId == amenityId
-            dateMatches && amenityMatches
+        val filtered = state.allBookings.filter {
+            it.amenityId == amenityId && it.dateString == date && it.status != BookingStatus.CANCELLED
         }.sortedBy { it.startTimeHour }
+
+        val area = AmenityCatalog.getAreaById(amenityId)
+        val slots = generateTimeSlots(area, date, filtered)
+
+        _uiState.value = state.copy(
+            filteredBookings = filtered,
+            timeSlots = slots
+        )
     }
 
-    private fun generateCalendarDays(selectedDate: String, bookings: List<AmenityBooking>): List<CalendarDay> {
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val dayOfWeekFormat = SimpleDateFormat("EEE", Locale("es", "MX"))
-        val dayNumberFormat = SimpleDateFormat("dd", Locale.getDefault())
-        val todayStr = AmenityBooking.todayDateString()
+    private fun generateTimeSlots(
+        area: AmenityArea?,
+        dateString: String,
+        bookings: List<AmenityBooking>
+    ): List<TimeSlotSlot> {
+        val start = area?.startHour ?: 8
+        val end = area?.endHour ?: 22
 
+        return (start until end).map { hour ->
+            val active = bookings.find { it.startTimeHour <= hour && hour < it.endTimeHour }
+            TimeSlotSlot(
+                hour = hour,
+                hourLabel = String.format("%02d:00", hour),
+                isAvailable = (active == null),
+                activeBooking = active
+            )
+        }
+    }
+
+    private fun generateCalendarDays(selectedDate: String): List<CalendarDay> {
+        val days = mutableListOf<CalendarDay>()
         val cal = Calendar.getInstance()
-        val list = mutableListOf<CalendarDay>()
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val dayFormat = SimpleDateFormat("d", Locale.getDefault())
+        val weekFormat = SimpleDateFormat("EEEEE", Locale("es", "MX"))
 
         for (i in 0 until 14) {
-            val date = cal.time
-            val dStr = sdf.format(date)
-            val hasBook = bookings.any { it.dateString == dStr && it.status != BookingStatus.CANCELADA }
-
-            list.add(
+            val dStr = sdf.format(cal.time)
+            val dNum = dayFormat.format(cal.time).toIntOrNull() ?: 1
+            val dLetter = weekFormat.format(cal.time).uppercase()
+            days.add(
                 CalendarDay(
                     dateString = dStr,
-                    dayOfWeekLetter = dayOfWeekFormat.format(date).take(3).uppercase(Locale.getDefault()),
-                    dayOfMonthNumber = dayNumberFormat.format(date),
-                    isToday = dStr == todayStr,
-                    isSelected = dStr == selectedDate,
-                    hasBookings = hasBook
+                    dayOfMonthNumber = dNum,
+                    dayOfWeekLetter = dLetter,
+                    isToday = (dStr == todayString),
+                    isSelected = (dStr == selectedDate)
                 )
             )
             cal.add(Calendar.DAY_OF_YEAR, 1)
         }
-        return list
-    }
-
-    private fun generateTimeSlots(
-        dateStr: String,
-        amenityId: String?,
-        allBookings: List<AmenityBooking>
-    ): List<TimeSlotSlot> {
-        val activeBookings = allBookings.filter {
-            it.dateString == dateStr &&
-            it.status != BookingStatus.CANCELADA &&
-            (amenityId == null || it.amenityId == amenityId)
-        }
-
-        val startDayHour = 7
-        val endDayHour = 22
-        val slots = mutableListOf<TimeSlotSlot>()
-
-        for (hour in startDayHour..endDayHour) {
-            val bookingAtHour = activeBookings.firstOrNull {
-                hour >= it.startTimeHour && hour < it.endTimeHour
-            }
-            slots.add(
-                TimeSlotSlot(
-                    hour = hour,
-                    hourLabel = String.format(Locale.getDefault(), "%02d:00", hour),
-                    isAvailable = bookingAtHour == null,
-                    activeBooking = bookingAtHour
-                )
-            )
-        }
-        return slots
+        return days
     }
 }

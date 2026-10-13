@@ -15,6 +15,7 @@ class MedusaApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         initFirebaseServices()
     }
 
@@ -27,6 +28,9 @@ class MedusaApplication : Application() {
             } else {
                 Log.d(TAG, "FirebaseApp ya inicializado automáticamente.")
             }
+
+            // Inicializar Firebase App Check con reCAPTCHA Enterprise / Debug
+            com.example.medusaalfha.data.firebase.AppCheckHelper.initializeAppCheck(this)
 
             // Configuración de Firestore con persistencia local
             val firestore = FirebaseFirestore.getInstance()
@@ -45,7 +49,11 @@ class MedusaApplication : Application() {
 
             // Inicializar Canales de Notificación y Suscripciones FCM
             com.example.medusaalfha.data.fcm.ResidentNotificationHelper.createNotificationChannel(this)
-            com.example.medusaalfha.data.fcm.ResidentNotificationHelper.subscribeToHouseTopic("casa_54")
+            try {
+                com.example.medusaalfha.data.fcm.ResidentNotificationHelper.subscribeToHouseTopic("casa_54", this)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Aviso: suscripción de tópicos omitida en arranque: ${t.message}")
+            }
 
         } catch (e: Exception) {
             Log.e(TAG, "Error inicializando Firebase en Application: ${e.message}", e)
@@ -54,5 +62,7 @@ class MedusaApplication : Application() {
 
     companion object {
         private const val TAG = "Application"
+        var instance: MedusaApplication? = null
+            internal set
     }
 }

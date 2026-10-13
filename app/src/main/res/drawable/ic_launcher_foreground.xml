@@ -1,8 +1,9 @@
-<?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:width="66dp"
-        android:height="66dp"
-        android:drawable="@drawable/medusa_app_icon_1791173154790"
-        android:gravity="center" />
-</layer-list>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+  <path
+      android:fillColor="#FFFFFF"
+      android:pathData="M54,20L20,38v24c0,21 14.5,40.7 34,46c19.5,-5.3 34,-25 34,-46V38L54,20zM54,50c-5.5,0 -10,-4.5 -10,-10s4.5,-10 10,-10s10,4.5 10,10S59.5,50 54,50z"/>
+</vector>

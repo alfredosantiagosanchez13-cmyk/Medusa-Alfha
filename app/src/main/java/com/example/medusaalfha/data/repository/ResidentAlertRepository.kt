@@ -179,36 +179,24 @@ class ResidentAlertRepository(
         }
     }
 
-    private fun generateInitialSampleAlerts(): List<ResidentAlert> {
-        val now = System.currentTimeMillis()
-        return listOf(
-            ResidentAlert(
-                id = "ALT-1",
-                type = AlertType.VISITOR_ARRIVAL,
-                title = "🔔 Ingreso de Visita: Juan Pablo Juárez",
-                message = "Ingresó por Garita Principal hacia Casa 54 · Cto. Los Álamos en auto Nissan Versa [NZA-44-12].",
-                targetHouse = "Casa 54 · Circuito Los Álamos",
-                timestampMillis = now - 15 * 60 * 1000,
-                isRead = false
-            ),
-            ResidentAlert(
-                id = "ALT-2",
-                type = AlertType.BOOKING_CONFIRMED,
-                title = "📅 Reserva Confirmada: Palapa & Alberca",
-                message = "Reserva aprobada para el sábado de 12:00 a 15:00 hrs para Casa 18.",
-                targetHouse = "Casa 18 · Cto. Encinos",
-                timestampMillis = now - 65 * 60 * 1000,
-                isRead = true
-            ),
-            ResidentAlert(
-                id = "ALT-3",
-                type = AlertType.VISITOR_ARRIVAL,
-                title = "📦 Paquetería en Caseta: Amazon México",
-                message = "Repartidor autorizado dejó paquete en recepción para Casa 34.",
-                targetHouse = "Casa 34 · Circuito Los Álamos",
-                timestampMillis = now - 120 * 60 * 1000,
-                isRead = true
-            )
+    private fun generateInitialSampleAlerts(): List<ResidentAlert> = listOf(
+        ResidentAlert(
+            id = "ALT-INIT-1",
+            type = AlertType.VISITOR_ARRIVAL,
+            title = "🔔 Acceso Vehicular: Ing. Roberto Garza",
+            message = "Acceso autorizado por Caseta Principal a Casa 54 · Cto. Álamos.",
+            targetHouse = "Casa 54 · Circuito Los Álamos",
+            timestampMillis = System.currentTimeMillis() - 1000 * 60 * 15,
+            metadata = mapOf("folio" to "VIS-9812", "plate" to "NZA-88-21")
+        ),
+        ResidentAlert(
+            id = "ALT-INIT-2",
+            type = AlertType.BOOKING_CONFIRMED,
+            title = "📅 Reserva Aprobada: Palapa & Alberca",
+            message = "Tu espacio para el fin de semana se encuentra reservado exitosamente.",
+            targetHouse = "Casa 54 · Circuito Los Álamos",
+            timestampMillis = System.currentTimeMillis() - 1000 * 60 * 65,
+            metadata = mapOf("amenity" to "Palapa & Alberca")
         )
-    }
+    )
 }

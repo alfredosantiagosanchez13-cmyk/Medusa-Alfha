@@ -1,65 +1,41 @@
 package com.example.medusaalfha.data.model
 
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-
-enum class AlertType {
-    VISITOR_ARRIVAL,
-    BOOKING_CONFIRMED,
-    BOOKING_CANCELLED,
-    SECURITY_PATROL,
-    GENERAL_NOTICE
-}
-
 data class ResidentAlert(
-    val id: String = "ALT-${System.currentTimeMillis() % 100000}",
+    val id: String = "",
     val type: AlertType = AlertType.VISITOR_ARRIVAL,
     val title: String = "",
     val message: String = "",
-    val targetHouse: String = "Casa 54 · Circuito Los Álamos",
+    val targetHouse: String = "",
     val timestampMillis: Long = System.currentTimeMillis(),
     val metadata: Map<String, String> = emptyMap(),
-    val isRead: Boolean = false,
-    val condominiumId: String = "PRADOS_1"
+    val isRead: Boolean = false
 ) {
-    fun formattedTime(): String {
-        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
-        return sdf.format(Date(timestampMillis))
-    }
-
-    fun toMap(): Map<String, Any?> {
-        return mapOf(
-            "id" to id,
-            "type" to type.name,
-            "title" to title,
-            "message" to message,
-            "targetHouse" to targetHouse,
-            "timestampMillis" to timestampMillis,
-            "metadata" to metadata,
-            "isRead" to isRead,
-            "condominiumId" to condominiumId
-        )
-    }
+    fun toMap(): Map<String, Any?> = mapOf(
+        "id" to id,
+        "type" to type.name,
+        "title" to title,
+        "message" to message,
+        "targetHouse" to targetHouse,
+        "timestampMillis" to timestampMillis,
+        "metadata" to metadata,
+        "isRead" to isRead
+    )
 
     companion object {
-        fun fromMap(data: Map<String, Any?>): ResidentAlert {
+        fun fromMap(map: Map<String, Any>): ResidentAlert {
+            val typeStr = map["type"] as? String ?: AlertType.VISITOR_ARRIVAL.name
+            val typeEnum = try { AlertType.valueOf(typeStr) } catch (_: Exception) { AlertType.VISITOR_ARRIVAL }
+            @Suppress("UNCHECKED_CAST")
+            val meta = (map["metadata"] as? Map<String, String>) ?: emptyMap()
             return ResidentAlert(
-                id = data["id"] as? String ?: "",
-                type = try {
-                    AlertType.valueOf(data["type"] as? String ?: "VISITOR_ARRIVAL")
-                } catch (_: Exception) {
-                    AlertType.VISITOR_ARRIVAL
-                },
-                title = data["title"] as? String ?: "",
-                message = data["message"] as? String ?: "",
-                targetHouse = data["targetHouse"] as? String ?: "Casa 54",
-                timestampMillis = (data["timestampMillis"] as? Number)?.toLong() ?: System.currentTimeMillis(),
-                metadata = (data["metadata"] as? Map<*, *>)?.mapNotNull { (k, v) ->
-                    if (k is String && v is String) k to v else null
-                }?.toMap() ?: emptyMap(),
-                isRead = data["isRead"] as? Boolean ?: false,
-                condominiumId = data["condominiumId"] as? String ?: "PRADOS_1"
+                id = map["id"] as? String ?: "",
+                type = typeEnum,
+                title = map["title"] as? String ?: "",
+                message = map["message"] as? String ?: "",
+                targetHouse = map["targetHouse"] as? String ?: "",
+                timestampMillis = (map["timestampMillis"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                metadata = meta,
+                isRead = map["isRead"] as? Boolean ?: false
             )
         }
     }

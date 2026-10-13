@@ -76,25 +76,72 @@ object ResidentNotificationHelper {
 
     /**
      * Suscribe el dispositivo al tema de su vivienda (ej. "prados_casa_54")
+     * Controla excepciones de cuota o rate-limit como TOO_MANY_REGISTRATIONS y evita llamadas repetidas
+     * usando caché local en SharedPreferences.
      */
-    fun subscribeToHouseTopic(houseRaw: String) {
+    fun subscribeToHouseTopic(houseRaw: String, context: Context? = null) {
         try {
+            if (context != null) {
+                val googleApiAvailability = com.google.android.gms.common.GoogleApiAvailability.getInstance()
+                val resultCode = googleApiAvailability.isGooglePlayServicesAvailable(context)
+                if (resultCode != com.google.android.gms.common.ConnectionResult.SUCCESS) {
+                    Log.i(TAG, "Google Play Services no disponible en este dispositivo/emulador (código: $resultCode). Se omite suscripción FCM.")
+                    return
+                }
+
+                // Evitar registro repetitivo de tópicos si ya fueron registrados para este houseId
+                val prefs = context.getSharedPreferences("fcm_topic_prefs", Context.MODE_PRIVATE)
+                val lastSubscribed = prefs.getString("last_subscribed_house", null)
+                val lastSubscribedTime = prefs.getLong("last_subscribed_timestamp", 0L)
+                val isRecent = (System.currentTimeMillis() - lastSubscribedTime) < (24 * 60 * 60 * 1000) // 24 horas
+
+                if (lastSubscribed == houseRaw && isRecent) {
+                    Log.d(TAG, "Tópico FCM ya suscrito recientemente ($houseRaw). Omitiendo solicitud redundante para prevenir TOO_MANY_REGISTRATIONS.")
+                    return
+                }
+            }
+
             val sanitized = houseRaw.lowercase()
                 .replace(Regex("[^a-z0-9_]"), "_")
                 .trim('_')
             val topic = "topic_$sanitized"
-            FirebaseMessaging.getInstance().subscribeToTopic(topic)
-                .addOnSuccessListener {
-                    Log.d(TAG, "Suscrito exitosamente a FCM topic: $topic")
+
+            val messaging = FirebaseMessaging.getInstance()
+
+            messaging.token
+                .addOnSuccessListener { token ->
+                    Log.d(TAG, "FCM Token disponible: $token. Suscribiendo a tópico: $topic")
+                    messaging.subscribeToTopic(topic)
+                        .addOnSuccessListener {
+                            Log.d(TAG, "Suscrito exitosamente a FCM topic: $topic")
+                            if (context != null) {
+                                context.getSharedPreferences("fcm_topic_prefs", Context.MODE_PRIVATE)
+                                    .edit()
+                                    .putString("last_subscribed_house", houseRaw)
+                                    .putLong("last_subscribed_timestamp", System.currentTimeMillis())
+                                    .apply()
+                            }
+                        }
+                        .addOnFailureListener { e ->
+                            handleFcmFailure("subscribeToTopic($topic)", e)
+                        }
                 }
                 .addOnFailureListener { e ->
-                    Log.w(TAG, "Error suscribiendo a FCM topic: ${e.message}")
+                    handleFcmFailure("getToken", e)
                 }
-
-            // Suscribir a alertas generales del condominio
-            FirebaseMessaging.getInstance().subscribeToTopic("prados_general_alerts")
         } catch (e: Exception) {
-            Log.w(TAG, "Advertencia al suscribir topic: ${e.message}")
+            handleFcmFailure("subscribeToHouseTopic", e)
+        }
+    }
+
+    private fun handleFcmFailure(operation: String, error: Throwable) {
+        val message = error.message ?: error.toString()
+        if (message.contains("TOO_MANY_REGISTRATIONS", ignoreCase = true)) {
+            Log.w(TAG, "FCM [$operation]: Límite de registros alcanzado en el dispositivo (TOO_MANY_REGISTRATIONS). El sistema opera normalmente mediante Firestore y notificaciones locales.")
+        } else if (message.contains("SERVICE_NOT_AVAILABLE", ignoreCase = true)) {
+            Log.w(TAG, "FCM [$operation]: Servicio de Google Play no disponible temporalmente. Sincronización diferida.")
+        } else {
+            Log.w(TAG, "Aviso FCM en [$operation]: $message")
         }
     }
 }

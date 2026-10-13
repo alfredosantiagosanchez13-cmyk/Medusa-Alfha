@@ -1,44 +1,44 @@
 package com.example.medusaalfha.ui.viewmodel
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.medusaalfha.data.model.VisitorEntry
 import com.example.medusaalfha.data.model.VisitorStatus
-import com.example.medusaalfha.data.repository.ResidentAlertRepository
 import com.example.medusaalfha.data.repository.VisitorRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
-enum class VisitorFilterTab(val label: String) {
-    TODOS("Todos"),
-    DENTRO("En Sitio"),
-    SALIDA("Salidas"),
-    PAQUETERIA("Paquetería")
+enum class VisitorFilterTab(val title: String) {
+    ALL("Todos"),
+    INSIDE("En Sitio"),
+    AUTHORIZED("Autorizados"),
+    CHECKED_OUT("Salidas")
 }
 
 data class VisitorUiState(
-    val isLoading: Boolean = true,
-    val allEntries: List<VisitorEntry> = emptyList(),
+    val entries: List<VisitorEntry> = emptyList(),
     val filteredEntries: List<VisitorEntry> = emptyList(),
+    val currentFilter: VisitorFilterTab = VisitorFilterTab.ALL,
     val searchQuery: String = "",
-    val activeFilter: VisitorFilterTab = VisitorFilterTab.TODOS,
+    val isLoading: Boolean = true,
     val selectedEntry: VisitorEntry? = null,
-    val isSeeding: Boolean = false,
-    val userNotice: String? = null,
-    val errorMessage: String? = null
+    val isAddDialogOpen: Boolean = false,
+    val isAlertsSheetOpen: Boolean = false,
+    val isScannerOpen: Boolean = false,
+    val scannedPass: com.example.medusaalfha.data.scanner.ParsedVisitorPass? = null,
+    val scanSuccessMessage: String? = null,
+    val totalInsideCount: Int = 0,
+    val totalTodayCount: Int = 0,
+    val totalAuthorizedCount: Int = 0
 )
 
-class VisitorViewModel @JvmOverloads constructor(
-    application: Application,
+class VisitorViewModel(
     private val repository: VisitorRepository = VisitorRepository(),
-    private val alertRepository: ResidentAlertRepository = ResidentAlertRepository()
-) : AndroidViewModel(application) {
+    private val alertRepository: com.example.medusaalfha.data.repository.ResidentAlertRepository = com.example.medusaalfha.data.repository.ResidentAlertRepository()
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(VisitorUiState())
     val uiState: StateFlow<VisitorUiState> = _uiState.asStateFlow()
@@ -48,148 +48,152 @@ class VisitorViewModel @JvmOverloads constructor(
     }
 
     private fun listenToRecentVisitorEntries() {
-        _uiState.value = _uiState.value.copy(isLoading = true)
-
-        repository.getRecentVisitorEntries()
-            .onEach { list ->
-                val entries = if (list.isEmpty()) repository.getFallbackSampleEntries() else list
-                val filtered = applyFilters(entries, _uiState.value.searchQuery, _uiState.value.activeFilter)
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    allEntries = entries,
-                    filteredEntries = filtered,
-                    errorMessage = null
-                )
-            }
-            .catch { e ->
-                val fallback = repository.getFallbackSampleEntries()
-                val filtered = applyFilters(fallback, _uiState.value.searchQuery, _uiState.value.activeFilter)
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    allEntries = fallback,
-                    filteredEntries = filtered,
-                    errorMessage = "Conexión a Firestore en modo contingencia: ${e.message}"
-                )
-            }
-            .launchIn(viewModelScope)
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            repository.getVisitorEntriesFlow()
+                .catch { e ->
+                    _uiState.value = _uiState.value.copy(isLoading = false)
+                }
+                .collect { list ->
+                    val inside = list.count { it.status == VisitorStatus.DENTRO }
+                    val auth = list.count { it.status == VisitorStatus.AUTORIZADO }
+                    _uiState.value = _uiState.value.copy(
+                        entries = list,
+                        isLoading = false,
+                        totalInsideCount = inside,
+                        totalTodayCount = list.size,
+                        totalAuthorizedCount = auth
+                    )
+                    applyFilters()
+                }
+        }
     }
 
     fun onSearchQueryChanged(query: String) {
-        val filtered = applyFilters(_uiState.value.allEntries, query, _uiState.value.activeFilter)
-        _uiState.value = _uiState.value.copy(
-            searchQuery = query,
-            filteredEntries = filtered
-        )
+        _uiState.value = _uiState.value.copy(searchQuery = query)
+        applyFilters()
     }
 
     fun onFilterTabSelected(tab: VisitorFilterTab) {
-        val filtered = applyFilters(_uiState.value.allEntries, _uiState.value.searchQuery, tab)
-        _uiState.value = _uiState.value.copy(
-            activeFilter = tab,
-            filteredEntries = filtered
-        )
+        _uiState.value = _uiState.value.copy(currentFilter = tab)
+        applyFilters()
     }
 
-    fun onSelectVisitorEntry(entry: VisitorEntry) {
+    fun onSelectEntryForDetail(entry: VisitorEntry?) {
         _uiState.value = _uiState.value.copy(selectedEntry = entry)
     }
 
-    fun onDismissDetailSheet() {
-        _uiState.value = _uiState.value.copy(selectedEntry = null)
+    fun setAddDialogOpen(open: Boolean) {
+        _uiState.value = _uiState.value.copy(isAddDialogOpen = open)
+    }
+
+    fun setAlertsSheetOpen(open: Boolean) {
+        _uiState.value = _uiState.value.copy(isAlertsSheetOpen = open)
+    }
+
+    fun registerQuickVisitor(
+        visitorName: String,
+        destinationHouse: String,
+        vehiclePlate: String,
+        notes: String
+    ) {
+        val newEntry = VisitorEntry(
+            folio = "FOL-${System.currentTimeMillis() % 100000}",
+            visitorName = visitorName.trim(),
+            destinationHouse = destinationHouse.trim(),
+            vehiclePlate = vehiclePlate.trim().ifEmpty { null },
+            notes = notes.trim().ifEmpty { null },
+            status = VisitorStatus.DENTRO,
+            checkInTimestamp = System.currentTimeMillis()
+        )
+        viewModelScope.launch {
+            repository.registerVisitorEntry(newEntry)
+            setAddDialogOpen(false)
+        }
     }
 
     fun markVisitorCheckOut(folio: String) {
         viewModelScope.launch {
-            val result = repository.registerVisitorCheckOut(folio)
-            val updatedAll = _uiState.value.allEntries.map {
-                if (it.folio == folio) it.copy(status = VisitorStatus.SALIDA, checkOutTimestamp = System.currentTimeMillis()) else it
+            repository.markVisitorCheckOut(folio)
+            if (_uiState.value.selectedEntry?.folio == folio) {
+                _uiState.value = _uiState.value.copy(selectedEntry = null)
             }
-            val filtered = applyFilters(updatedAll, _uiState.value.searchQuery, _uiState.value.activeFilter)
+        }
+    }
+
+    fun setScannerOpen(open: Boolean) {
+        _uiState.value = _uiState.value.copy(
+            isScannerOpen = open,
+            scannedPass = if (!open) null else _uiState.value.scannedPass
+        )
+    }
+
+    fun onQrCodeScanned(qrRawText: String) {
+        val parsed = com.example.medusaalfha.data.scanner.ParsedVisitorPass.parse(qrRawText)
+        _uiState.value = _uiState.value.copy(
+            scannedPass = parsed
+        )
+    }
+
+    fun confirmScannedPass(context: android.content.Context) {
+        val pass = _uiState.value.scannedPass ?: return
+        val entry = pass.toVisitorEntry()
+        viewModelScope.launch {
+            repository.registerVisitorEntry(entry)
+            try {
+                alertRepository.dispatchVisitorArrivalAlert(
+                    context = context,
+                    visitorName = entry.visitorName,
+                    destinationHouse = entry.destinationHouse,
+                    folio = entry.folio,
+                    vehiclePlate = entry.vehiclePlate
+                )
+            } catch (_: Exception) {}
+
             _uiState.value = _uiState.value.copy(
-                allEntries = updatedAll,
-                filteredEntries = filtered,
-                selectedEntry = _uiState.value.selectedEntry?.let { if (it.folio == folio) it.copy(status = VisitorStatus.SALIDA, checkOutTimestamp = System.currentTimeMillis()) else it },
-                userNotice = if (result.isSuccess) "Salida del folio $folio sincronizada en Firestore." else "Salida registrada en el dispositivo."
+                isScannerOpen = false,
+                scannedPass = null,
+                scanSuccessMessage = "¡Acceso concedido para ${entry.visitorName} (${entry.destinationHouse})!"
             )
         }
+    }
+
+    fun dismissScannedPass() {
+        _uiState.value = _uiState.value.copy(scannedPass = null)
+    }
+
+    fun clearScanSuccessMessage() {
+        _uiState.value = _uiState.value.copy(scanSuccessMessage = null)
     }
 
     fun seedSampleDataToFirestore() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isSeeding = true)
-            val result = repository.seedInitialVisitorEntriesIfEmpty()
-            _uiState.value = _uiState.value.copy(
-                isSeeding = false,
-                userNotice = if (result.isSuccess) "Registros sincronizados con Cloud Firestore." else "Catálogo activo localmente."
-            )
+            repository.seedInitialDataIfEmpty()
         }
     }
 
-    fun registerQuickVisitor(name: String, house: String, plate: String, type: String) {
-        viewModelScope.launch {
-            val generatedFolio = "VIS-${System.currentTimeMillis() % 100000}"
-            val newEntry = VisitorEntry(
-                folio = generatedFolio,
-                visitorName = name.ifBlank { "Visitante Express" },
-                destinationHouse = house.ifBlank { "Casa 54 · Circuito Los Álamos" },
-                visitorType = type,
-                checkInTimestamp = System.currentTimeMillis(),
-                status = VisitorStatus.DENTRO,
-                vehiclePlate = plate.ifBlank { null },
-                authorizedBy = "Residente $house",
-                guardName = "Oficial Juan Pérez · Garita 1",
-                accessMethod = "REGISTRO MANUAL CASETA",
-                notes = "Ingreso registrado desde terminal táctica"
-            )
-            val res = repository.registerVisitorCheckIn(newEntry)
+    private fun applyFilters() {
+        val current = _uiState.value
+        val query = current.searchQuery.trim().lowercase()
 
-            // Emitir Alerta en Tiempo Real y Notificación al Residente
-            alertRepository.dispatchVisitorArrivalAlert(
-                context = getApplication(),
-                visitorName = newEntry.visitorName,
-                destinationHouse = newEntry.destinationHouse,
-                folio = generatedFolio,
-                vehiclePlate = newEntry.vehiclePlate
-            )
+        var result = current.entries
 
-            val updatedAll = listOf(newEntry) + _uiState.value.allEntries.filter { it.folio != newEntry.folio }
-            val filtered = applyFilters(updatedAll, _uiState.value.searchQuery, _uiState.value.activeFilter)
-            _uiState.value = _uiState.value.copy(
-                allEntries = updatedAll,
-                filteredEntries = filtered,
-                userNotice = if (res.isSuccess) {
-                    "Visitante ${newEntry.visitorName} registrado en Firestore (Folio $generatedFolio)."
-                } else {
-                    "Visitante ${newEntry.visitorName} registrado (Folio $generatedFolio)."
-                }
-            )
-        }
-    }
-
-    fun clearUserNotice() {
-        _uiState.value = _uiState.value.copy(userNotice = null)
-    }
-
-    private fun applyFilters(
-        list: List<VisitorEntry>,
-        query: String,
-        filterTab: VisitorFilterTab
-    ): List<VisitorEntry> {
-        return list.filter { item ->
-            val matchesTab = when (filterTab) {
-                VisitorFilterTab.TODOS -> true
-                VisitorFilterTab.DENTRO -> item.status == VisitorStatus.DENTRO
-                VisitorFilterTab.SALIDA -> item.status == VisitorStatus.SALIDA
-                VisitorFilterTab.PAQUETERIA -> item.visitorType.contains("PAQUETER", ignoreCase = true)
+        if (query.isNotEmpty()) {
+            result = result.filter {
+                it.visitorName.lowercase().contains(query) ||
+                it.destinationHouse.lowercase().contains(query) ||
+                (it.vehiclePlate?.lowercase()?.contains(query) == true) ||
+                it.folio.lowercase().contains(query)
             }
-
-            val matchesQuery = query.isBlank() ||
-                item.visitorName.contains(query, ignoreCase = true) ||
-                item.destinationHouse.contains(query, ignoreCase = true) ||
-                item.folio.contains(query, ignoreCase = true) ||
-                (item.vehiclePlate?.contains(query, ignoreCase = true) == true)
-
-            matchesTab && matchesQuery
         }
+
+        result = when (current.currentFilter) {
+            VisitorFilterTab.ALL -> result
+            VisitorFilterTab.INSIDE -> result.filter { it.status == VisitorStatus.DENTRO }
+            VisitorFilterTab.AUTHORIZED -> result.filter { it.status == VisitorStatus.AUTORIZADO }
+            VisitorFilterTab.CHECKED_OUT -> result.filter { it.status == VisitorStatus.SALIDA }
+        }
+
+        _uiState.value = current.copy(filteredEntries = result)
     }
 }
