@@ -81,9 +81,9 @@ class GuardStationViewModel(
 
     val patrolRepository: PatrolSyncRepository? = customPatrolRepository ?: run {
         try {
-            if (::MedusaApplication.instance.isInitialized) {
-                PatrolSyncRepository.getInstance(MedusaApplication.instance)
-            } else null
+            com.example.medusaalfha.MedusaApplication.instance?.let { app ->
+                PatrolSyncRepository.getInstance(app)
+            }
         } catch (_: Throwable) {
             null
         }

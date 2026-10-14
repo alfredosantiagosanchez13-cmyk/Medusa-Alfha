@@ -1,0 +1,132 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile(data) {
+      return data.id is string &&
+             data.email is string &&
+             data.role in ['GUARD', 'ADMIN', 'SUPERVISOR'] &&
+             (!('displayName' in data) || data.displayName is string);
+    }
+
+    function isValidPatrolCheckpoint(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 64 &&
+             data.code is string && data.code.size() > 0 && data.code.size() <= 32 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
+             data.latitude is number && data.longitude is number &&
+             data.isValidated is bool &&
+             (!('description' in data) || data.description is string) &&
+             (!('toleranceMeters' in data) || data.toleranceMeters is number) &&
+             (!('validatedAtMillis' in data) || data.validatedAtMillis == null || data.validatedAtMillis is number) &&
+             (!('mapXPercent' in data) || data.mapXPercent is number) &&
+             (!('mapYPercent' in data) || data.mapYPercent is number) &&
+             (!('lastUpdatedMillis' in data) || data.lastUpdatedMillis is number) &&
+             (!('userId' in data) || data.userId is string);
+    }
+
+    function isValidPatrolReport(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 64 &&
+             data.timestampMillis is number &&
+             data.zone is string && data.zone.size() > 0 && data.zone.size() <= 100 &&
+             data.reportText is string && data.reportText.size() <= 5000 &&
+             data.isAiAssisted is bool &&
+             (!('createdAtMillis' in data) || data.createdAtMillis is number) &&
+             (!('userId' in data) || data.userId is string);
+    }
+
+    function isValidVisitorEntry(data) {
+      return data.folio is string && data.folio.size() > 0 && data.folio.size() <= 64 &&
+             data.visitorName is string && data.visitorName.size() > 0 && data.visitorName.size() <= 128 &&
+             data.destinationHouse is string && data.destinationHouse.size() > 0 && data.destinationHouse.size() <= 32 &&
+             data.status in ['DENTRO', 'SALIDA', 'AUTORIZADO', 'DENEGADO', 'SALIO', 'RECHAZADO'] &&
+             data.checkInTimestamp is number &&
+             (!('visitorType' in data) || data.visitorType is string) &&
+             (!('vehiclePlate' in data) || data.vehiclePlate == null || data.vehiclePlate is string) &&
+             (!('accessMethod' in data) || data.accessMethod is string) &&
+             (!('checkOutTimestamp' in data) || data.checkOutTimestamp == null || data.checkOutTimestamp is number) &&
+             (!('notes' in data) || data.notes == null || data.notes is string) &&
+             (!('authorizedBy' in data) || data.authorizedBy is string) &&
+             (!('guardName' in data) || data.guardName is string) &&
+             (!('condominiumId' in data) || data.condominiumId is string) &&
+             (!('userId' in data) || data.userId is string);
+    }
+
+    function isValidResidentAlert(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 64 &&
+             data.type is string && data.type.size() > 0 && data.type.size() <= 64 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 128 &&
+             data.message is string && data.message.size() <= 2000 &&
+             data.targetHouse is string && data.targetHouse.size() > 0 && data.targetHouse.size() <= 32 &&
+             data.timestampMillis is number &&
+             (!('metadata' in data) || data.metadata is map) &&
+             (!('isRead' in data) || data.isRead is bool) &&
+             (!('userId' in data) || data.userId is string);
+    }
+
+    function isValidAmenityBooking(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 64 &&
+             data.amenityId is string && data.amenityId.size() > 0 && data.amenityId.size() <= 64 &&
+             data.residentHouse is string && data.residentHouse.size() > 0 && data.residentHouse.size() <= 32 &&
+             data.dateString is string && data.dateString.size() == 10 &&
+             data.startTimeHour is int && data.endTimeHour is int &&
+             data.status in ['CONFIRMED', 'PENDING', 'CANCELLED'] &&
+             (!('amenityName' in data) || data.amenityName is string) &&
+             (!('residentName' in data) || data.residentName is string) &&
+             (!('guestCount' in data) || data.guestCount is int) &&
+             (!('notes' in data) || data.notes is string) &&
+             (!('createdAtMillis' in data) || data.createdAtMillis is number) &&
+             (!('condominiumId' in data) || data.condominiumId is string) &&
+             (!('userId' in data) || data.userId is string);
+    }
+
+    // Perfiles de usuario
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+
+    // Módulos del Condominio
+    match /condominiums/{condominiumId} {
+      allow read: if isAuthenticated();
+
+      match /patrol_checkpoints/{checkpointId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidPatrolCheckpoint(request.resource.data);
+        allow delete: if isAuthenticated();
+      }
+
+      match /patrol_reports/{reportId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidPatrolReport(request.resource.data);
+        allow delete: if isAuthenticated();
+      }
+
+      match /visitor_entries/{visitorId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidVisitorEntry(request.resource.data);
+        allow delete: if isAuthenticated();
+      }
+
+      match /resident_alerts/{alertId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidResidentAlert(request.resource.data);
+        allow delete: if isAuthenticated();
+      }
+
+      match /amenity_bookings/{bookingId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isAuthenticated() && isValidAmenityBooking(request.resource.data);
+        allow delete: if isAuthenticated();
+      }
+    }
+  }
+}

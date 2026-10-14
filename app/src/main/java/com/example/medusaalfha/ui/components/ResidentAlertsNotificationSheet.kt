@@ -27,8 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.example.medusaalfha.data.model.AlertType
 import com.example.medusaalfha.data.model.ResidentAlert
 import com.example.medusaalfha.data.repository.ResidentAlertRepository
-import com.example.medusaalfha.ui.theme.NavyPrimary
-import com.example.medusaalfha.ui.theme.TealAccent
+import com.example.medusaalfha.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -129,6 +128,7 @@ private fun AlertItemCard(alert: ResidentAlert) {
     val (icon, tint) = when (alert.type) {
         AlertType.VISITOR_ARRIVAL -> Icons.Default.Person to TealAccent
         AlertType.BOOKING_CONFIRMED -> Icons.Default.DateRange to Color(0xFF2563EB)
+        AlertType.PACKAGE_DELIVERED -> Icons.Default.Notifications to StatusGreen
         AlertType.SECURITY_PANIC -> Icons.Default.Warning to Color(0xFFDC2626)
         AlertType.MAINTENANCE_NOTICE -> Icons.Default.Notifications to Color(0xFFD97706)
     }

@@ -16,7 +16,11 @@ import kotlinx.coroutines.tasks.await
  * Repositorio de Alertas y Notificaciones para Residentes y Seguridad.
  */
 class ResidentAlertRepository(
-    private val firestoreProvider: () -> FirebaseFirestore = { FirebaseFirestore.getInstance() }
+    private val firestoreProvider: () -> FirebaseFirestore = {
+        val app = com.example.medusaalfha.MedusaApplication.instance
+            ?: throw IllegalStateException("MedusaApplication instance not ready")
+        com.example.medusaalfha.data.firebase.FirebaseProvider.getFirestore(app)
+    }
 ) {
     private val firestore by lazy { firestoreProvider() }
 

@@ -53,7 +53,7 @@ class MedusaFirebaseMessagingService : FirebaseMessagingService() {
 
     private fun registerTokenToFirestore(token: String) {
         try {
-            val firestore = FirebaseFirestore.getInstance()
+            val firestore = com.example.medusaalfha.data.firebase.FirebaseProvider.getFirestore(applicationContext)
             val tokenData = mapOf(
                 "token" to token,
                 "registeredAt" to System.currentTimeMillis(),

@@ -40,7 +40,11 @@ data class PatrolSyncState(
 class PatrolSyncRepository(
     private val database: MedusaDatabase,
     private val networkMonitor: NetworkConnectivityMonitor,
-    private val firestoreProvider: () -> FirebaseFirestore = { FirebaseFirestore.getInstance() },
+    private val firestoreProvider: () -> FirebaseFirestore = {
+        val app = com.example.medusaalfha.MedusaApplication.instance
+            ?: throw IllegalStateException("MedusaApplication instance not ready")
+        com.example.medusaalfha.data.firebase.FirebaseProvider.getFirestore(app)
+    },
     private val coroutineScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) {
 
@@ -62,7 +66,10 @@ class PatrolSyncRepository(
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: PatrolSyncRepository(
                     database = MedusaDatabase.getInstance(context),
-                    networkMonitor = NetworkConnectivityMonitor(context)
+                    networkMonitor = NetworkConnectivityMonitor(context),
+                    firestoreProvider = {
+                        com.example.medusaalfha.data.firebase.FirebaseProvider.getFirestore(context)
+                    }
                 ).also { INSTANCE = it }
             }
         }
@@ -371,20 +378,28 @@ class PatrolSyncRepository(
     }
 
     private suspend fun pushCheckpointToFirestore(entity: CheckpointEntity) {
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "guard_active"
+        val payload = entity.toFirestoreMap().toMutableMap().apply {
+            put("userId", uid)
+        }
         firestore.collection(COLLECTION_CONDOMINIUMS)
             .document(DEFAULT_CONDOMINIUM_ID)
             .collection(SUBCOLLECTION_CHECKPOINTS)
             .document(entity.id)
-            .set(entity.toFirestoreMap())
+            .set(payload)
             .await()
     }
 
     private suspend fun pushReportToFirestore(entity: PatrolReportEntity) {
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: "guard_active"
+        val payload = entity.toFirestoreMap().toMutableMap().apply {
+            put("userId", uid)
+        }
         firestore.collection(COLLECTION_CONDOMINIUMS)
             .document(DEFAULT_CONDOMINIUM_ID)
             .collection(SUBCOLLECTION_REPORTS)
             .document(entity.id)
-            .set(entity.toFirestoreMap())
+            .set(payload)
             .await()
     }
 

@@ -1,0 +1,139 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Perfil del guardia o usuario autenticado",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "UID de Firebase Auth" },
+        "email": { "type": "string", "description": "Correo del guardia" },
+        "displayName": { "type": "string", "description": "Nombre y rango del oficial" },
+        "role": { "type": "string", "description": "Rol de seguridad", "enum": ["GUARD", "ADMIN", "SUPERVISOR"] },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Timestamp de actualización" }
+      },
+      "required": ["id", "email", "role"]
+    },
+    "PatrolCheckpoint": {
+      "title": "PatrolCheckpoint",
+      "description": "Punto de control perimetral para rondín de seguridad",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Identificador único de checkpoint" },
+        "code": { "type": "string", "description": "Código de punto (e.g. CP-01)" },
+        "name": { "type": "string", "description": "Nombre del checkpoint" },
+        "description": { "type": "string", "description": "Detalle de ubicación" },
+        "latitude": { "type": "number", "description": "Coordenada latitud" },
+        "longitude": { "type": "number", "description": "Coordenada longitud" },
+        "toleranceMeters": { "type": "number", "description": "Radio de tolerancia GPS" },
+        "isValidated": { "type": "boolean", "description": "Estado de validación física" },
+        "validatedAtMillis": { "type": "number", "description": "Timestamp epoch de validación" },
+        "mapXPercent": { "type": "number", "description": "Posición X en mapa interactivo" },
+        "mapYPercent": { "type": "number", "description": "Posición Y en mapa interactivo" },
+        "lastUpdatedMillis": { "type": "number", "description": "Última actualización" },
+        "userId": { "type": "string", "description": "UID del oficial autenticado" }
+      },
+      "required": ["id", "code", "name", "latitude", "longitude", "isValidated"]
+    },
+    "PatrolReport": {
+      "title": "PatrolReport",
+      "description": "Reporte de novedades y rondín asistido por IA",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID del reporte" },
+        "timestampMillis": { "type": "number", "description": "Fecha y hora del reporte" },
+        "zone": { "type": "string", "description": "Zona inspeccionada" },
+        "reportText": { "type": "string", "description": "Texto del informe" },
+        "isAiAssisted": { "type": "boolean", "description": "Indica si fue dictado/asistido con IA" },
+        "createdAtMillis": { "type": "number", "description": "Timestamp de creación" },
+        "userId": { "type": "string", "description": "UID del oficial autenticado" }
+      },
+      "required": ["id", "timestampMillis", "zone", "reportText", "isAiAssisted"]
+    },
+    "VisitorEntry": {
+      "title": "VisitorEntry",
+      "description": "Registro de acceso y control de visitantes",
+      "type": "object",
+      "properties": {
+        "folio": { "type": "string", "description": "Folio de acceso" },
+        "visitorName": { "type": "string", "description": "Nombre del visitante" },
+        "visitorType": { "type": "string", "description": "Tipo de visita o paquetería" },
+        "destinationHouse": { "type": "string", "description": "Casa destino" },
+        "vehiclePlate": { "type": "string", "description": "Placa del vehículo" },
+        "accessMethod": { "type": "string", "description": "Método de acceso QR o Manual" },
+        "status": { "type": "string", "description": "Estado del visitante", "enum": ["DENTRO", "SALIO", "RECHAZADO"] },
+        "checkInTimestamp": { "type": "number", "description": "Timestamp epoch de entrada" },
+        "checkOutTimestamp": { "type": "number", "description": "Timestamp epoch de salida" },
+        "notes": { "type": "string", "description": "Observaciones" },
+        "authorizedBy": { "type": "string", "description": "Residente que autoriza" },
+        "guardName": { "type": "string", "description": "Nombre del guardia en turno" },
+        "condominiumId": { "type": "string", "description": "ID del condominio" },
+        "userId": { "type": "string", "description": "UID del guardia registrador" }
+      },
+      "required": ["folio", "visitorName", "destinationHouse", "status", "checkInTimestamp"]
+    },
+    "ResidentAlert": {
+      "title": "ResidentAlert",
+      "description": "Notificación cruzada o alerta de seguridad enviada a residentes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Identificador de alerta" },
+        "type": { "type": "string", "description": "Tipo de alerta" },
+        "title": { "type": "string", "description": "Título de la notificación" },
+        "message": { "type": "string", "description": "Cuerpo del mensaje" },
+        "targetHouse": { "type": "string", "description": "Casa objetivo" },
+        "timestampMillis": { "type": "number", "description": "Timestamp de emisión" },
+        "isRead": { "type": "boolean", "description": "Estado de lectura" },
+        "userId": { "type": "string", "description": "UID del creador" }
+      },
+      "required": ["id", "type", "title", "message", "targetHouse", "timestampMillis"]
+    },
+    "AmenityBooking": {
+      "title": "AmenityBooking",
+      "description": "Reserva de área común del condominio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID de la reserva" },
+        "amenityId": { "type": "string", "description": "ID de amenidad" },
+        "amenityName": { "type": "string", "description": "Nombre de la amenidad" },
+        "residentName": { "type": "string", "description": "Nombre del residente" },
+        "residentHouse": { "type": "string", "description": "Casa del residente" },
+        "dateString": { "type": "string", "description": "Fecha YYYY-MM-DD" },
+        "startTimeHour": { "type": "number", "description": "Hora inicio (0-23)" },
+        "endTimeHour": { "type": "number", "description": "Hora fin (0-23)" },
+        "guestCount": { "type": "number", "description": "Cantidad de invitados" },
+        "status": { "type": "string", "description": "Estado de reserva", "enum": ["CONFIRMED", "PENDING", "CANCELLED"] },
+        "notes": { "type": "string", "description": "Notas adicionales" },
+        "createdAtMillis": { "type": "number", "description": "Timestamp de creación" },
+        "condominiumId": { "type": "string", "description": "ID del condominio" },
+        "userId": { "type": "string", "description": "UID del usuario" }
+      },
+      "required": ["id", "amenityId", "residentHouse", "dateString", "startTimeHour", "endTimeHour", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Perfil del guardia o usuario autenticado"
+    },
+    "/condominiums/{condominiumId}/patrol_checkpoints/{checkpointId}": {
+      "schema": "PatrolCheckpoint",
+      "description": "Checkpoints georreferenciados para rondines"
+    },
+    "/condominiums/{condominiumId}/patrol_reports/{reportId}": {
+      "schema": "PatrolReport",
+      "description": "Bitácora de informes y novedades de patrullaje"
+    },
+    "/condominiums/{condominiumId}/visitor_entries/{visitorId}": {
+      "schema": "VisitorEntry",
+      "description": "Registro de ingresos de visitantes y paquetería"
+    },
+    "/condominiums/{condominiumId}/resident_alerts/{alertId}": {
+      "schema": "ResidentAlert",
+      "description": "Alertas y notificaciones enviadas a residentes"
+    },
+    "/condominiums/{condominiumId}/amenity_bookings/{bookingId}": {
+      "schema": "AmenityBooking",
+      "description": "Reservas de amenidades del condominio"
+    }
+  }
+}

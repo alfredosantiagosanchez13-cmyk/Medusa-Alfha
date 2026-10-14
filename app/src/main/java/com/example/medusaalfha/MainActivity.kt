@@ -34,13 +34,46 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             MEDUSAALFHATheme {
-                MainAppContainer(
+                AppRootContent(
                     visitorViewModel = visitorViewModel,
                     bookingViewModel = bookingViewModel,
                     guardStationViewModel = guardStationViewModel
                 )
             }
         }
+    }
+}
+
+@Composable
+fun AppRootContent(
+    visitorViewModel: VisitorViewModel,
+    bookingViewModel: AmenityBookingViewModel,
+    guardStationViewModel: com.example.medusaalfha.ui.viewmodel.GuardStationViewModel
+) {
+    val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
+    var currentUser by remember { mutableStateOf(auth.currentUser) }
+
+    DisposableEffect(auth) {
+        val listener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { firebaseAuth ->
+            currentUser = firebaseAuth.currentUser
+        }
+        auth.addAuthStateListener(listener)
+        onDispose {
+            auth.removeAuthStateListener(listener)
+        }
+    }
+
+    if (currentUser == null) {
+        com.example.medusaalfha.ui.components.AuthScreen(
+            onAuthSuccess = { currentUser = auth.currentUser }
+        )
+    } else {
+        MainAppContainer(
+            visitorViewModel = visitorViewModel,
+            bookingViewModel = bookingViewModel,
+            guardStationViewModel = guardStationViewModel,
+            onSignOut = { currentUser = null }
+        )
     }
 }
 
@@ -55,10 +88,14 @@ enum class MedusaScreen(val title: String) {
 fun MainAppContainer(
     visitorViewModel: VisitorViewModel,
     bookingViewModel: AmenityBookingViewModel,
-    guardStationViewModel: com.example.medusaalfha.ui.viewmodel.GuardStationViewModel
+    guardStationViewModel: com.example.medusaalfha.ui.viewmodel.GuardStationViewModel,
+    onSignOut: () -> Unit = {}
 ) {
     val visitorUiState by visitorViewModel.uiState.collectAsState()
     var currentScreen by remember { mutableStateOf(MedusaScreen.GUARD_PANEL) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val credentialManager = remember { androidx.credentials.CredentialManager.create(context) }
 
     Scaffold(
         topBar = {
@@ -68,12 +105,12 @@ fun MainAppContainer(
                         Text(
                             text = "MEDUSA ALFHA",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = NavyPrimary
+                            color = GoldMetallic
                         )
                         Text(
-                            text = "Control de Accesos & Áreas Comunes · Caseta Principal",
+                            text = "Control de Accesos & Ciberseguridad · Caseta",
                             fontSize = 11.sp,
-                            color = Color.Gray
+                            color = NeonBlue
                         )
                     }
                 },
@@ -82,11 +119,25 @@ fun MainAppContainer(
                         Icon(
                             imageVector = Icons.Default.Notifications,
                             contentDescription = "Alertas y Notificaciones",
-                            tint = TealAccent
+                            tint = GoldMetallic
+                        )
+                    }
+                    IconButton(onClick = {
+                        com.example.medusaalfha.ui.components.performSignOut(
+                            context = context,
+                            credentialManager = credentialManager,
+                            onSignOutComplete = onSignOut,
+                            scope = coroutineScope
+                        )
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Logout,
+                            contentDescription = "Cerrar Sesión",
+                            tint = AlertRed
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CyberSurface)
             )
         },
         bottomBar = {

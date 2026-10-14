@@ -15,7 +15,11 @@ import kotlinx.coroutines.tasks.await
  * y fallback en memoria para operación ininterrumpida.
  */
 class VisitorRepository(
-    private val firestoreProvider: () -> FirebaseFirestore = { FirebaseFirestore.getInstance() }
+    private val firestoreProvider: () -> FirebaseFirestore = {
+        val app = com.example.medusaalfha.MedusaApplication.instance
+            ?: throw IllegalStateException("MedusaApplication instance not ready")
+        com.example.medusaalfha.data.firebase.FirebaseProvider.getFirestore(app)
+    }
 ) {
     private val firestore by lazy { firestoreProvider() }
 

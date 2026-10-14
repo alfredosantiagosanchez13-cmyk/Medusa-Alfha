@@ -32,8 +32,8 @@ class MedusaApplication : Application() {
             // Inicializar Firebase App Check con reCAPTCHA Enterprise / Debug
             com.example.medusaalfha.data.firebase.AppCheckHelper.initializeAppCheck(this)
 
-            // Configuración de Firestore con persistencia local
-            val firestore = FirebaseFirestore.getInstance()
+            // Configuración de Firestore con persistencia local y custom database ID
+            val firestore = com.example.medusaalfha.data.firebase.FirebaseProvider.getFirestore(this)
             val settings = FirebaseFirestoreSettings.Builder()
                 .setLocalCacheSettings(
                     PersistentCacheSettings.newBuilder()
@@ -41,7 +41,7 @@ class MedusaApplication : Application() {
                 )
                 .build()
             firestore.firestoreSettings = settings
-            Log.d(TAG, "Cloud Firestore configurado con caché persistente.")
+            Log.d(TAG, "Cloud Firestore configurado con custom DB y caché persistente.")
 
             // Verificación y configuración de Firebase Auth
             val auth = FirebaseAuth.getInstance()

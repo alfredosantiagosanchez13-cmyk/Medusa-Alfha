@@ -68,6 +68,12 @@ android {
     compose = true
     buildConfig = true
   }
+
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+    }
+  }
 }
 
 dependencies {
@@ -91,6 +97,9 @@ dependencies {
   implementation(libs.firebase.ai)
   implementation(libs.firebase.firestore)
   implementation(libs.firebase.auth)
+  implementation(libs.androidx.credentials)
+  implementation(libs.androidx.credentials.play.services)
+  implementation(libs.googleid)
   implementation(libs.firebase.messaging)
   implementation(libs.androidx.navigation.compose)
   implementation(libs.firebase.appcheck.recaptcha)
