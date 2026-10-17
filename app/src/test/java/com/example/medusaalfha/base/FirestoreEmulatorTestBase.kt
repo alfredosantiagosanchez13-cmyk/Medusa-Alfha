@@ -31,6 +31,22 @@ abstract class FirestoreEmulatorTestBase {
 
     @Before
     open fun setUpFirebase() {
+        val emulatorAvailable = try {
+            val firestoreSocket = java.net.Socket()
+            firestoreSocket.connect(java.net.InetSocketAddress(EMULATOR_HOST, FIRESTORE_PORT), 300)
+            firestoreSocket.close()
+            val authSocket = java.net.Socket()
+            authSocket.connect(java.net.InetSocketAddress(EMULATOR_HOST, AUTH_PORT), 300)
+            authSocket.close()
+            true
+        } catch (_: Exception) {
+            false
+        }
+        org.junit.Assume.assumeTrue(
+            "Firebase emulators must be running on $EMULATOR_HOST:$FIRESTORE_PORT and $AUTH_PORT for emulator rule tests",
+            emulatorAvailable
+        )
+
         val context = ApplicationProvider.getApplicationContext<Context>()
         val resId = context.resources.getIdentifier("firestore_database_id", "string", context.packageName)
         databaseId = if (resId != 0) context.getString(resId) else "demo-database"

@@ -172,7 +172,7 @@ class GuardStationViewModelTest {
 
         // El informe se redacta con estructura militarizada
         // Esperamos que el formato táctico contenga encabezado y secciones requeridas
-        Thread.sleep(1900) // delay en coroutine del ViewModel
+        Thread.sleep(2200) // delay en coroutine del ViewModel
         val generatedText = viewModel.uiState.value.patrolReportText
         assertTrue(generatedText.isNotBlank())
         assertTrue(generatedText.contains("INFORME TÁCTICO DE RONDÍN"))

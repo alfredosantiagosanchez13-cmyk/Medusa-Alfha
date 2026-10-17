@@ -464,45 +464,45 @@ class GuardStationViewModel(
      * Sincroniza con Room inmediatamente, y con Firestore sólo si hay Internet activo.
      */
     fun validateCheckpointLocation(checkpointId: String) {
+        if (patrolRepository == null) {
+            val now = System.currentTimeMillis()
+            val currentCheckpoints = _uiState.value.checkpoints.map { cp ->
+                if (cp.id == checkpointId) {
+                    cp.copy(
+                        isValidated = true,
+                        validatedAtMillis = now
+                    )
+                } else {
+                    cp
+                }
+            }
+
+            val updatedCp = currentCheckpoints.find { it.id == checkpointId }
+            val validatedCount = currentCheckpoints.count { it.isValidated }
+            val totalCount = currentCheckpoints.size
+
+            val feedback = "GPS OK: ${updatedCp?.name} verificado dentro de ${updatedCp?.toleranceMeters}m de tolerancia. ($validatedCount/$totalCount puntos cubiertos)."
+
+            _uiState.update {
+                it.copy(
+                    checkpoints = currentCheckpoints,
+                    selectedCheckpoint = updatedCp,
+                    lastCheckpointFeedback = feedback,
+                    systemNotice = feedback
+                )
+            }
+            return
+        }
+
         viewModelScope.launch {
-            if (patrolRepository != null) {
-                val feedback = patrolRepository.validateCheckpoint(checkpointId)
-                val updatedCp = _uiState.value.checkpoints.find { it.id == checkpointId }
-                _uiState.update {
-                    it.copy(
-                        selectedCheckpoint = updatedCp,
-                        lastCheckpointFeedback = feedback,
-                        systemNotice = feedback
-                    )
-                }
-            } else {
-                // Fallback en memoria si Room no está inicializado (ej. entorno de tests básicos)
-                val now = System.currentTimeMillis()
-                val currentCheckpoints = _uiState.value.checkpoints.map { cp ->
-                    if (cp.id == checkpointId) {
-                        cp.copy(
-                            isValidated = true,
-                            validatedAtMillis = now
-                        )
-                    } else {
-                        cp
-                    }
-                }
-
-                val updatedCp = currentCheckpoints.find { it.id == checkpointId }
-                val validatedCount = currentCheckpoints.count { it.isValidated }
-                val totalCount = currentCheckpoints.size
-
-                val feedback = "GPS OK: ${updatedCp?.name} verificado dentro de ${updatedCp?.toleranceMeters}m de tolerancia. ($validatedCount/$totalCount puntos cubiertos)."
-
-                _uiState.update {
-                    it.copy(
-                        checkpoints = currentCheckpoints,
-                        selectedCheckpoint = updatedCp,
-                        lastCheckpointFeedback = feedback,
-                        systemNotice = feedback
-                    )
-                }
+            val feedback = patrolRepository.validateCheckpoint(checkpointId)
+            val updatedCp = _uiState.value.checkpoints.find { it.id == checkpointId }
+            _uiState.update {
+                it.copy(
+                    selectedCheckpoint = updatedCp,
+                    lastCheckpointFeedback = feedback,
+                    systemNotice = feedback
+                )
             }
         }
     }
@@ -512,26 +512,27 @@ class GuardStationViewModel(
      * Actualiza Room y sincroniza con Firestore si hay conexión a Internet.
      */
     fun resetPatrolCircuit() {
+        if (patrolRepository == null) {
+            val resetList = _uiState.value.checkpoints.map {
+                it.copy(isValidated = false, validatedAtMillis = null)
+            }
+            _uiState.update {
+                it.copy(
+                    checkpoints = resetList,
+                    selectedCheckpoint = null,
+                    lastCheckpointFeedback = "Nuevo circuito de rondín iniciado. Todos los checkpoints restablecidos."
+                )
+            }
+            return
+        }
+
         viewModelScope.launch {
-            if (patrolRepository != null) {
-                patrolRepository.resetCircuit()
-                _uiState.update {
-                    it.copy(
-                        selectedCheckpoint = null,
-                        lastCheckpointFeedback = "Nuevo circuito de rondín iniciado. Todos los checkpoints restablecidos."
-                    )
-                }
-            } else {
-                val resetList = _uiState.value.checkpoints.map {
-                    it.copy(isValidated = false, validatedAtMillis = null)
-                }
-                _uiState.update {
-                    it.copy(
-                        checkpoints = resetList,
-                        selectedCheckpoint = null,
-                        lastCheckpointFeedback = "Nuevo circuito de rondín iniciado. Todos los checkpoints restablecidos."
-                    )
-                }
+            patrolRepository.resetCircuit()
+            _uiState.update {
+                it.copy(
+                    selectedCheckpoint = null,
+                    lastCheckpointFeedback = "Nuevo circuito de rondín iniciado. Todos los checkpoints restablecidos."
+                )
             }
         }
     }
@@ -600,43 +601,44 @@ Checkpoints GPS verificados: ${currentValidated.size}/${_uiState.value.checkpoin
         val text = _uiState.value.patrolReportText.trim()
         if (text.isBlank()) return
 
+        if (patrolRepository == null) {
+            val newLog = PatrolLogEntry(
+                id = "ROND-${System.currentTimeMillis() % 100000}",
+                timestampMillis = System.currentTimeMillis(),
+                zone = "Circuito Completo Residencial",
+                reportText = text,
+                isAiAssisted = true
+            )
+
+            val updated = _uiState.value.patrolLogs.toMutableList()
+            updated.add(0, newLog)
+
+            _uiState.update {
+                it.copy(
+                    patrolLogs = updated,
+                    patrolReportText = "",
+                    voiceFeedbackMessage = null,
+                    systemNotice = "Rondín registrado en la bitácora permanente de seguridad."
+                )
+            }
+            return
+        }
+
         viewModelScope.launch {
-            if (patrolRepository != null) {
-                val savedEntry = patrolRepository.saveReport(
-                    zone = "Circuito Completo Residencial",
-                    reportText = text,
-                    isAiAssisted = true
+            val savedEntry = patrolRepository.saveReport(
+                zone = "Circuito Completo Residencial",
+                reportText = text,
+                isAiAssisted = true
+            )
+            _uiState.update {
+                it.copy(
+                    patrolReportText = "",
+                    voiceFeedbackMessage = null,
+                    systemNotice = if (savedEntry.isSynced)
+                        "Rondín guardado en Room y sincronizado con Cloud Firestore."
+                    else
+                        "Rondín guardado localmente en Room. Pendiente de sincronización a Firestore."
                 )
-                _uiState.update {
-                    it.copy(
-                        patrolReportText = "",
-                        voiceFeedbackMessage = null,
-                        systemNotice = if (savedEntry.isSynced)
-                            "Rondín guardado en Room y sincronizado con Cloud Firestore."
-                        else
-                            "Rondín guardado localmente en Room. Pendiente de sincronización a Firestore."
-                    )
-                }
-            } else {
-                val newLog = PatrolLogEntry(
-                    id = "ROND-${System.currentTimeMillis() % 100000}",
-                    timestampMillis = System.currentTimeMillis(),
-                    zone = "Circuito Completo Residencial",
-                    reportText = text,
-                    isAiAssisted = true
-                )
-
-                val updated = _uiState.value.patrolLogs.toMutableList()
-                updated.add(0, newLog)
-
-                _uiState.update {
-                    it.copy(
-                        patrolLogs = updated,
-                        patrolReportText = "",
-                        voiceFeedbackMessage = null,
-                        systemNotice = "Rondín registrado en la bitácora permanente de seguridad."
-                    )
-                }
             }
         }
     }
