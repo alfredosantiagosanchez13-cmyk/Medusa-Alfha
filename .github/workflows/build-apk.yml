@@ -22,17 +22,27 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
+
+      - name: Setup Android SDK & Accept Licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" "build-tools;36.0.0" || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
       - name: Prepare Debug Keystore
         run: |
-          if [ -f debug.keystore.base64 ]; then
+          if [ -s debug.keystore ]; then
+            echo "debug.keystore already present in repository."
+          elif [ -f debug.keystore.base64 ]; then
             base64 -d debug.keystore.base64 > debug.keystore
-          elif [ ! -f debug.keystore ]; then
+          else
             keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
+          # Verify keystore integrity
+          keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey
 
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
@@ -42,8 +52,8 @@ jobs:
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: MedusaAlfha-Debug-APK
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
           retention-days: 30
