@@ -245,7 +245,8 @@ fun MainAppContainer(
                         onRegisterQuickVisitor = { name, house, plate, notes ->
                             visitorViewModel.registerQuickVisitor(name, house, plate, notes)
                         },
-                        onDismissAddDialog = { visitorViewModel.setAddDialogOpen(false) }
+                        onDismissAddDialog = { visitorViewModel.setAddDialogOpen(false) },
+                        onRefresh = { visitorViewModel.refreshVisitorEntries() }
                     )
                 }
                 MedusaScreen.BOOKINGS -> {

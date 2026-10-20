@@ -84,6 +84,41 @@ class VisitorRepository(
     }
 
     /**
+     * Fuerza una lectura manual y fresca desde Cloud Firestore para pull-to-refresh.
+     */
+    suspend fun refreshVisitorEntries(condominiumId: String = DEFAULT_CONDOMINIUM_ID): Result<List<VisitorEntry>> {
+        return try {
+            val snapshot = firestore.collection(COLLECTION_CONDOMINIUMS)
+                .document(condominiumId)
+                .collection(SUBCOLLECTION_VISITORS)
+                .orderBy("checkInTimestamp", Query.Direction.DESCENDING)
+                .limit(50)
+                .get()
+                .await()
+
+            val entries = if (!snapshot.isEmpty) {
+                snapshot.documents.mapNotNull { doc ->
+                    doc.data?.let { VisitorEntry.fromMap(it) }
+                }
+            } else {
+                inMemoryFallbackList.toList()
+            }
+
+            synchronized(inMemoryFallbackList) {
+                if (entries.isNotEmpty()) {
+                    inMemoryFallbackList.clear()
+                    inMemoryFallbackList.addAll(entries)
+                }
+            }
+            Log.d(TAG, "Bitácora actualizada exitosamente desde Firestore: ${entries.size} registros.")
+            Result.success(entries)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error refrescando visitantes desde Firestore: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Registra un nuevo ingreso de visitante en Firestore y actualiza el caché.
      */
     suspend fun registerVisitorEntry(entry: VisitorEntry): Result<VisitorEntry> {

@@ -5,12 +5,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +44,7 @@ fun RecentVisitorEntriesList(
     onOpenScanner: () -> Unit,
     onRegisterQuickVisitor: (String, String, String, String) -> Unit,
     onDismissAddDialog: () -> Unit,
+    onRefresh: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -51,7 +57,7 @@ fun RecentVisitorEntriesList(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Barra de búsqueda con botón de Escaneo QR integrado
+        // Barra de búsqueda con botón de actualización manual y Escaneo QR integrado
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -80,6 +86,33 @@ fun RecentVisitorEntriesList(
                 ),
                 singleLine = true
             )
+
+            FilledTonalIconButton(
+                onClick = onRefresh,
+                modifier = Modifier
+                    .size(52.dp)
+                    .padding(end = 6.dp)
+                    .testTag("refresh_visitor_log_button"),
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = CyberSurfaceElevated,
+                    contentColor = if (uiState.isRefreshing) NeonBlue else CyberTextMuted
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (uiState.isRefreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = NeonBlue,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Actualizar Bitácora desde Firestore",
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
 
             FilledTonalIconButton(
                 onClick = onOpenScanner,
@@ -125,39 +158,95 @@ fun RecentVisitorEntriesList(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Lista de visitantes
-        if (uiState.isLoading) {
-            Box(
+        // Aviso discreto de sincronización con Firestore
+        if (uiState.refreshFeedbackMessage != null) {
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                color = TealAccent.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(8.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, TealAccent.copy(alpha = 0.3f))
             ) {
-                CircularProgressIndicator(color = TealAccent)
-            }
-        } else if (uiState.filteredEntries.isEmpty()) {
-            EmptyVisitorEntriesView(
-                searchQuery = uiState.searchQuery,
-                onClearSearch = { onSearchChanged("") },
-                onOpenAddDialog = onOpenAddDialog
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                contentPadding = PaddingValues(bottom = 80.dp, top = 4.dp)
-            ) {
-                items(uiState.filteredEntries, key = { it.folio }) { entry ->
-                    VisitorEntryCard(
-                        entry = entry,
-                        onClick = { onSelectEntry(entry) },
-                        onCheckOut = { onCheckOut(entry.folio) }
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CloudDone,
+                        contentDescription = null,
+                        tint = TealAccent,
+                        modifier = Modifier.size(16.dp)
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = uiState.refreshFeedbackMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TealAccent,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        val pullRefreshState = rememberPullToRefreshState()
+
+        // Contenedor Pull-To-Refresh de la bitácora
+        PullToRefreshBox(
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = onRefresh,
+            state = pullRefreshState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .testTag("visitor_pull_to_refresh_box"),
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullRefreshState,
+                    isRefreshing = uiState.isRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    containerColor = CyberSurfaceElevated,
+                    color = NeonBlue
+                )
+            }
+        ) {
+            if (uiState.isLoading && !uiState.isRefreshing) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = TealAccent)
+                }
+            } else if (uiState.filteredEntries.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    EmptyVisitorEntriesView(
+                        searchQuery = uiState.searchQuery,
+                        onClearSearch = { onSearchChanged("") },
+                        onOpenAddDialog = onOpenAddDialog
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(bottom = 80.dp, top = 4.dp)
+                ) {
+                    items(uiState.filteredEntries, key = { it.folio }) { entry ->
+                        VisitorEntryCard(
+                            entry = entry,
+                            onClick = { onSelectEntry(entry) },
+                            onCheckOut = { onCheckOut(entry.folio) }
+                        )
+                    }
                 }
             }
         }

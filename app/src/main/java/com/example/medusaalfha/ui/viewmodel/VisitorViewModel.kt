@@ -32,7 +32,9 @@ data class VisitorUiState(
     val scanSuccessMessage: String? = null,
     val totalInsideCount: Int = 0,
     val totalTodayCount: Int = 0,
-    val totalAuthorizedCount: Int = 0
+    val totalAuthorizedCount: Int = 0,
+    val isRefreshing: Boolean = false,
+    val refreshFeedbackMessage: String? = null
 )
 
 class VisitorViewModel(
@@ -67,6 +69,41 @@ class VisitorViewModel(
                     applyFilters()
                 }
         }
+    }
+
+    /**
+     * Gatillo manual de actualización (Pull-To-Refresh) desde Cloud Firestore.
+     */
+    fun refreshVisitorEntries() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isRefreshing = true, refreshFeedbackMessage = null)
+            val result = repository.refreshVisitorEntries()
+            result.fold(
+                onSuccess = { list ->
+                    val inside = list.count { it.status == VisitorStatus.DENTRO }
+                    val auth = list.count { it.status == VisitorStatus.AUTORIZADO }
+                    _uiState.value = _uiState.value.copy(
+                        entries = list,
+                        isRefreshing = false,
+                        totalInsideCount = inside,
+                        totalTodayCount = list.size,
+                        totalAuthorizedCount = auth,
+                        refreshFeedbackMessage = "Bitácora actualizada en vivo desde Cloud Firestore"
+                    )
+                    applyFilters()
+                },
+                onFailure = { e ->
+                    _uiState.value = _uiState.value.copy(
+                        isRefreshing = false,
+                        refreshFeedbackMessage = "Actualizado con caché local (${e.localizedMessage ?: "Sin cambios"})"
+                    )
+                }
+            )
+        }
+    }
+
+    fun clearRefreshFeedback() {
+        _uiState.value = _uiState.value.copy(refreshFeedbackMessage = null)
     }
 
     fun onSearchQueryChanged(query: String) {
