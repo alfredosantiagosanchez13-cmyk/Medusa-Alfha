@@ -87,6 +87,18 @@ service cloud.firestore {
              (!('userId' in data) || data.userId is string);
     }
 
+    function isValidCondominium(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() <= 64 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
+             (!('address' in data) || data.address is string) &&
+             (!('totalUnits' in data) || data.totalUnits is int || data.totalUnits is number) &&
+             (!('adminContact' in data) || data.adminContact is string) &&
+             (!('gateCount' in data) || data.gateCount is int || data.gateCount is number) &&
+             (!('activeStatus' in data) || data.activeStatus is string) &&
+             (!('createdAtMillis' in data) || data.createdAtMillis is number) &&
+             (!('createdBy' in data) || data.createdBy is string);
+    }
+
     // Perfiles de usuario
     match /users/{userId} {
       allow read: if isAuthenticated();
@@ -94,9 +106,11 @@ service cloud.firestore {
       allow delete: if isOwner(userId);
     }
 
-    // Módulos del Condominio
+    // Módulos del Condominio y Registro de Condominios (Altas ALFHA Master)
     match /condominiums/{condominiumId} {
       allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidCondominium(request.resource.data);
+      allow delete: if isAuthenticated();
 
       match /patrol_checkpoints/{checkpointId} {
         allow read: if isAuthenticated();

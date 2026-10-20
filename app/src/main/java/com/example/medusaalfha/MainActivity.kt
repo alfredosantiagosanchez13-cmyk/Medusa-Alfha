@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -17,6 +18,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.example.medusaalfha.ui.components.AmenityBookingCalendarHub
 import com.example.medusaalfha.ui.components.RecentVisitorEntriesList
 import com.example.medusaalfha.ui.components.ResidentAlertsNotificationSheet
@@ -24,7 +26,7 @@ import com.example.medusaalfha.ui.theme.*
 import com.example.medusaalfha.ui.viewmodel.AmenityBookingViewModel
 import com.example.medusaalfha.ui.viewmodel.VisitorViewModel
 
-class MainActivity : ComponentActivity() {
+class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     private val visitorViewModel: VisitorViewModel by viewModels()
     private val bookingViewModel: AmenityBookingViewModel by viewModels()
@@ -80,7 +82,8 @@ fun AppRootContent(
 enum class MedusaScreen(val title: String) {
     GUARD_PANEL("Panel de Caseta"),
     VISITORS("Bitácora de Visitas"),
-    BOOKINGS("Áreas Comunes")
+    BOOKINGS("Áreas Comunes"),
+    MASTER_PANEL("ALFHA Master")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -93,28 +96,85 @@ fun MainAppContainer(
 ) {
     val visitorUiState by visitorViewModel.uiState.collectAsState()
     var currentScreen by remember { mutableStateOf(MedusaScreen.GUARD_PANEL) }
+    var isMasterUnlocked by remember { mutableStateOf(false) }
+    var showBiometricModal by remember { mutableStateOf(false) }
+
+    val condominiumRepository = remember { com.example.medusaalfha.data.repository.CondominiumRepository() }
+    val activeCondo by com.example.medusaalfha.data.repository.CondominiumRepository.activeCondominium.collectAsState()
+
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val credentialManager = remember { androidx.credentials.CredentialManager.create(context) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "MEDUSA ALFHA",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = GoldMetallic
+                            )
+                            if (isMasterUnlocked) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    color = GoldMetallic.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "MASTER",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = GoldMetallic,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
                         Text(
-                            text = "MEDUSA ALFHA",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = GoldMetallic
-                        )
-                        Text(
-                            text = "Control de Accesos & Ciberseguridad · Caseta",
+                            text = "${activeCondo.name} · Dir. Gral Santiago Sánchez",
                             fontSize = 11.sp,
-                            color = NeonBlue
+                            color = NeonBlue,
+                            maxLines = 1
                         )
                     }
                 },
                 actions = {
+                    // Botón de Lector de Huella ALFHA Master
+                    FilledTonalButton(
+                        onClick = {
+                            if (isMasterUnlocked) {
+                                currentScreen = MedusaScreen.MASTER_PANEL
+                            } else {
+                                showBiometricModal = true
+                            }
+                        },
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = if (isMasterUnlocked) EmeraldGreen.copy(alpha = 0.25f) else GoldMetallic.copy(alpha = 0.2f),
+                            contentColor = if (isMasterUnlocked) EmeraldGreen else GoldMetallic
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .padding(end = 4.dp)
+                            .testTag("topbar_master_biometric_button"),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Fingerprint,
+                            contentDescription = "Lector de Huella ALFHA Master",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = if (isMasterUnlocked) "MASTER" else "HUELLA",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                    }
+
                     IconButton(onClick = { visitorViewModel.setAlertsSheetOpen(true) }) {
                         Icon(
                             imageVector = Icons.Default.Notifications,
@@ -181,6 +241,22 @@ fun MainAppContainer(
                         indicatorColor = NeonBlue.copy(alpha = 0.2f)
                     )
                 )
+
+                if (isMasterUnlocked) {
+                    NavigationBarItem(
+                        selected = currentScreen == MedusaScreen.MASTER_PANEL,
+                        onClick = { currentScreen = MedusaScreen.MASTER_PANEL },
+                        icon = { Icon(Icons.Default.AdminPanelSettings, contentDescription = "ALFHA Master") },
+                        label = { Text("Master") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = GoldMetallic,
+                            selectedTextColor = GoldMetallic,
+                            unselectedIconColor = CyberTextMuted,
+                            unselectedTextColor = CyberTextMuted,
+                            indicatorColor = GoldMetallic.copy(alpha = 0.2f)
+                        )
+                    )
+                }
             }
         },
         floatingActionButton = {
@@ -210,9 +286,6 @@ fun MainAppContainer(
             }
         }
     ) { innerPadding ->
-        val context = androidx.compose.ui.platform.LocalContext.current
-        val snackbarHostState = remember { SnackbarHostState() }
-
         LaunchedEffect(visitorUiState.scanSuccessMessage) {
             visitorUiState.scanSuccessMessage?.let {
                 snackbarHostState.showSnackbar(it)
@@ -254,6 +327,18 @@ fun MainAppContainer(
                         bookingViewModel = bookingViewModel
                     )
                 }
+                MedusaScreen.MASTER_PANEL -> {
+                    com.example.medusaalfha.ui.components.MasterDirectorGeneralScreen(
+                        condominiumRepository = condominiumRepository,
+                        onNavigateToGuardPanel = { currentScreen = MedusaScreen.GUARD_PANEL },
+                        onNavigateToVisitors = { currentScreen = MedusaScreen.VISITORS },
+                        onNavigateToBookings = { currentScreen = MedusaScreen.BOOKINGS },
+                        onExitMasterMode = {
+                            isMasterUnlocked = false
+                            currentScreen = MedusaScreen.GUARD_PANEL
+                        }
+                    )
+                }
             }
 
             SnackbarHost(
@@ -276,6 +361,20 @@ fun MainAppContainer(
                     scannedPass = visitorUiState.scannedPass,
                     onConfirmPass = { visitorViewModel.confirmScannedPass(context) },
                     onDismissPass = { visitorViewModel.dismissScannedPass() }
+                )
+            }
+
+            if (showBiometricModal) {
+                com.example.medusaalfha.ui.components.AlfhaBiometricModal(
+                    onDismiss = { showBiometricModal = false },
+                    onAuthenticationSuccess = { userName ->
+                        showBiometricModal = false
+                        isMasterUnlocked = true
+                        currentScreen = MedusaScreen.MASTER_PANEL
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("¡Acceso Supremo Concedido: $userName (Director General)!")
+                        }
+                    }
                 )
             }
         }

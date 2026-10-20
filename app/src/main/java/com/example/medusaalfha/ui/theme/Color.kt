@@ -33,5 +33,6 @@ val StatusOrangeAlert = Color(0xFFFF8C00)
 val StatusNeonGreen = Color(0xFF00FF66) // Verde neón estricto
 val AlertRedFatigue = Color(0xFFFF3333)  // Rojo alerta brillante de fatiga laboral (>24h)
 val AlertRed = Color(0xFFFF3333)
+val EmeraldGreen = Color(0xFF10B981)
 
 

@@ -100,6 +100,7 @@ dependencies {
   implementation(libs.androidx.credentials)
   implementation(libs.androidx.credentials.play.services)
   implementation(libs.googleid)
+  implementation(libs.androidx.biometric)
   implementation(libs.firebase.messaging)
   implementation(libs.androidx.navigation.compose)
   implementation(libs.firebase.appcheck.recaptcha)
