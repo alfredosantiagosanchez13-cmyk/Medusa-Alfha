@@ -25,8 +25,8 @@ class VisitorViewModelUnitTest {
     fun testVisitorFilterTabTitles() {
         assertEquals("Todos", VisitorFilterTab.ALL.title)
         assertEquals("En Sitio", VisitorFilterTab.INSIDE.title)
-        assertEquals("Autorizados", VisitorFilterTab.AUTHORIZED.title)
         assertEquals("Salidas", VisitorFilterTab.CHECKED_OUT.title)
+        assertEquals("Paquetería", VisitorFilterTab.PACKAGES.title)
     }
 
     @Test

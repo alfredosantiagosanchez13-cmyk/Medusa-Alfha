@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -12,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -52,37 +54,18 @@ fun AppRootContent(
     bookingViewModel: AmenityBookingViewModel,
     guardStationViewModel: com.example.medusaalfha.ui.viewmodel.GuardStationViewModel
 ) {
-    val auth = com.google.firebase.auth.FirebaseAuth.getInstance()
-    var currentUser by remember { mutableStateOf(auth.currentUser) }
-
-    DisposableEffect(auth) {
-        val listener = com.google.firebase.auth.FirebaseAuth.AuthStateListener { firebaseAuth ->
-            currentUser = firebaseAuth.currentUser
-        }
-        auth.addAuthStateListener(listener)
-        onDispose {
-            auth.removeAuthStateListener(listener)
-        }
-    }
-
-    if (currentUser == null) {
-        com.example.medusaalfha.ui.components.AuthScreen(
-            onAuthSuccess = { currentUser = auth.currentUser }
-        )
-    } else {
-        MainAppContainer(
-            visitorViewModel = visitorViewModel,
-            bookingViewModel = bookingViewModel,
-            guardStationViewModel = guardStationViewModel,
-            onSignOut = { currentUser = null }
-        )
-    }
+    // Ingreso directo e inmediato a la app real de Los Prados Residencial
+    MainAppContainer(
+        visitorViewModel = visitorViewModel,
+        bookingViewModel = bookingViewModel,
+        guardStationViewModel = guardStationViewModel
+    )
 }
 
 enum class MedusaScreen(val title: String) {
-    GUARD_PANEL("Panel de Caseta"),
-    VISITORS("Bitácora de Visitas"),
+    VISITORS("Bitácora Garita"),
     BOOKINGS("Áreas Comunes"),
+    GUARD_PANEL("Control Caseta"),
     MASTER_PANEL("ALFHA Master")
 }
 
@@ -95,7 +78,7 @@ fun MainAppContainer(
     onSignOut: () -> Unit = {}
 ) {
     val visitorUiState by visitorViewModel.uiState.collectAsState()
-    var currentScreen by remember { mutableStateOf(MedusaScreen.GUARD_PANEL) }
+    var currentScreen by remember { mutableStateOf(MedusaScreen.VISITORS) }
     var isMasterUnlocked by remember { mutableStateOf(false) }
     var showBiometricModal by remember { mutableStateOf(false) }
 
@@ -111,35 +94,55 @@ fun MainAppContainer(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "MEDUSA ALFHA",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = GoldMetallic
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(GoldMetallic.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = "MEDUSA",
+                                tint = GoldMetallic,
+                                modifier = Modifier.size(20.dp)
                             )
-                            if (isMasterUnlocked) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Surface(
-                                    color = GoldMetallic.copy(alpha = 0.2f),
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
-                                    Text(
-                                        text = "MASTER",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = GoldMetallic,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                    )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "MEDUSA ALFHA",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 1.sp
+                                    ),
+                                    color = Color.White
+                                )
+                                if (isMasterUnlocked) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        color = GoldMetallic.copy(alpha = 0.2f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "MASTER",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = GoldMetallic,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
                                 }
                             }
+                            Text(
+                                text = "Los Prados Residencial · Garita & Residentes",
+                                fontSize = 11.sp,
+                                color = CyberTextMuted,
+                                maxLines = 1
+                            )
                         }
-                        Text(
-                            text = "${activeCondo.name} · Dir. Gral Santiago Sánchez",
-                            fontSize = 11.sp,
-                            color = NeonBlue,
-                            maxLines = 1
-                        )
                     }
                 },
                 actions = {
@@ -175,26 +178,24 @@ fun MainAppContainer(
                         )
                     }
 
+                    // Campana de notificaciones con badge 1
                     IconButton(onClick = { visitorViewModel.setAlertsSheetOpen(true) }) {
-                        Icon(
-                            imageVector = Icons.Default.Notifications,
-                            contentDescription = "Alertas y Notificaciones",
-                            tint = GoldMetallic
-                        )
-                    }
-                    IconButton(onClick = {
-                        com.example.medusaalfha.ui.components.performSignOut(
-                            context = context,
-                            credentialManager = credentialManager,
-                            onSignOutComplete = onSignOut,
-                            scope = coroutineScope
-                        )
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Logout,
-                            contentDescription = "Cerrar Sesión",
-                            tint = AlertRed
-                        )
+                        BadgedBox(
+                            badge = {
+                                Badge(
+                                    containerColor = GoldMetallic,
+                                    contentColor = Color.Black
+                                ) {
+                                    Text("1", fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = "Alertas y Notificaciones",
+                                tint = GoldMetallic
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = CyberSurface)
@@ -203,23 +204,23 @@ fun MainAppContainer(
         bottomBar = {
             NavigationBar(containerColor = CyberSurface) {
                 NavigationBarItem(
-                    selected = currentScreen == MedusaScreen.GUARD_PANEL,
-                    onClick = { currentScreen = MedusaScreen.GUARD_PANEL },
-                    icon = { Icon(Icons.Default.Security, contentDescription = "Panel de Caseta") },
-                    label = { Text("Panel Caseta") },
+                    selected = currentScreen == MedusaScreen.VISITORS,
+                    onClick = { currentScreen = MedusaScreen.VISITORS },
+                    icon = { Icon(Icons.Default.Security, contentDescription = "Bitácora Garita") },
+                    label = { Text("Bitácora Garita") },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = GoldMetallic,
                         selectedTextColor = GoldMetallic,
                         unselectedIconColor = CyberTextMuted,
                         unselectedTextColor = CyberTextMuted,
-                        indicatorColor = NeonBlue.copy(alpha = 0.2f)
+                        indicatorColor = GoldMetallic.copy(alpha = 0.2f)
                     )
                 )
                 NavigationBarItem(
-                    selected = currentScreen == MedusaScreen.VISITORS,
-                    onClick = { currentScreen = MedusaScreen.VISITORS },
-                    icon = { Icon(Icons.Default.Badge, contentDescription = "Bitácora") },
-                    label = { Text("Bitácora") },
+                    selected = currentScreen == MedusaScreen.BOOKINGS,
+                    onClick = { currentScreen = MedusaScreen.BOOKINGS },
+                    icon = { Icon(Icons.Default.Event, contentDescription = "Áreas Comunes") },
+                    label = { Text("Áreas Comunes") },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = NeonBlue,
                         selectedTextColor = NeonBlue,
@@ -229,10 +230,10 @@ fun MainAppContainer(
                     )
                 )
                 NavigationBarItem(
-                    selected = currentScreen == MedusaScreen.BOOKINGS,
-                    onClick = { currentScreen = MedusaScreen.BOOKINGS },
-                    icon = { Icon(Icons.Default.Event, contentDescription = "Áreas Comunes") },
-                    label = { Text("Reservas") },
+                    selected = currentScreen == MedusaScreen.GUARD_PANEL,
+                    onClick = { currentScreen = MedusaScreen.GUARD_PANEL },
+                    icon = { Icon(Icons.Default.LocalPolice, contentDescription = "Control Caseta") },
+                    label = { Text("Control Caseta") },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = NeonBlue,
                         selectedTextColor = NeonBlue,
@@ -274,14 +275,14 @@ fun MainAppContainer(
                         modifier = Modifier.testTag("scan_qr_fab")
                     )
 
-                    FloatingActionButton(
+                    ExtendedFloatingActionButton(
                         onClick = { visitorViewModel.setAddDialogOpen(true) },
-                        containerColor = NavyPrimary,
-                        contentColor = Color.White,
+                        containerColor = GoldMetallic,
+                        contentColor = Color.Black,
+                        icon = { Icon(Icons.Default.PersonAdd, contentDescription = "Registrar Visita") },
+                        text = { Text("REGISTRAR VISITA", fontWeight = FontWeight.ExtraBold) },
                         modifier = Modifier.testTag("manual_add_fab")
-                    ) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = "Registro Manual")
-                    }
+                    )
                 }
             }
         }

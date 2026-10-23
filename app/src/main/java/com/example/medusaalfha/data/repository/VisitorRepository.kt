@@ -238,9 +238,34 @@ class VisitorRepository(
         val now = System.currentTimeMillis()
         return listOf(
             VisitorEntry(
-                folio = "FOL-2026-901",
+                folio = "VIS-2026-1041",
+                visitorName = "Arq. Sofía Villaseñor",
+                visitorType = "VISITANTE",
+                destinationHouse = "Casa 54 · Circuito Los Álamos",
+                vehiclePlate = "UMC-341-K",
+                accessMethod = "Pase QR Digital",
+                status = VisitorStatus.SALIDA,
+                checkInTimestamp = now - 1000 * 60 * 75,
+                checkOutTimestamp = now - 1000 * 60 * 15,
+                notes = "Reunión de supervisión de obra.",
+                authorizedBy = "Residente Titular"
+            ),
+            VisitorEntry(
+                folio = "VIS-2026-1042",
+                visitorName = "Amazon Logistics (Pali 2r)",
+                visitorType = "PAQUETERÍA",
+                destinationHouse = "Casa 12 · Calle 1 (Pali 2r)",
+                vehiclePlate = "LE-44-102",
+                accessMethod = "Confirmación en Caseta",
+                status = VisitorStatus.DENTRO,
+                checkInTimestamp = now - 1000 * 60 * 18,
+                notes = "Entrega con confirmación telefónica en caseta.",
+                authorizedBy = "Caseta de Vigilancia"
+            ),
+            VisitorEntry(
+                folio = "VIS-2026-1043",
                 visitorName = "Lic. Carlos Mendoza",
-                visitorType = "Visita Familiar",
+                visitorType = "VISITANTE",
                 destinationHouse = "Casa 54 · Cto. Álamos",
                 vehiclePlate = "NZA-98-12",
                 accessMethod = "Código QR",
@@ -250,41 +275,55 @@ class VisitorRepository(
                 authorizedBy = "Arq. González (Titular)"
             ),
             VisitorEntry(
-                folio = "FOL-2026-902",
-                visitorName = "Paquetería Express (Amazon)",
-                visitorType = "Servicios & Entregas",
-                destinationHouse = "Casa 12 · Cto. Fresnos",
-                vehiclePlate = "LE-44-102",
-                accessMethod = "Pase Digital",
-                status = VisitorStatus.DENTRO,
-                checkInTimestamp = now - 1000 * 60 * 45,
-                notes = "Entrega de paquete con confirmación en caseta.",
-                authorizedBy = "Caseta de Vigilancia"
-            ),
-            VisitorEntry(
-                folio = "FOL-2026-903",
+                folio = "VIS-2026-1044",
                 visitorName = "Ing. Mariana Torres",
-                visitorType = "Contratista / Mantenimiento",
+                visitorType = "VISITANTE",
                 destinationHouse = "Casa 88 · Cto. Encinos",
                 vehiclePlate = "JHM-31-90",
                 accessMethod = "Acceso Manual",
                 status = VisitorStatus.SALIDA,
                 checkInTimestamp = now - 1000 * 60 * 180,
-                checkOutTimestamp = now - 1000 * 60 * 15,
+                checkOutTimestamp = now - 1000 * 60 * 35,
                 notes = "Revisión técnica de paneles solares.",
                 authorizedBy = "Ing. Torres"
             ),
             VisitorEntry(
-                folio = "FOL-2026-904",
+                folio = "VIS-2026-1045",
                 visitorName = "Técnico Telmex Fibra",
-                visitorType = "Servicios & Entregas",
+                visitorType = "PAQUETERÍA",
                 destinationHouse = "Casa 31 · Cto. Álamos",
                 vehiclePlate = "UB-88-71",
                 accessMethod = "Pase Digital",
-                status = VisitorStatus.AUTORIZADO,
-                checkInTimestamp = now - 1000 * 60 * 5,
+                status = VisitorStatus.SALIDA,
+                checkInTimestamp = now - 1000 * 60 * 120,
+                checkOutTimestamp = now - 1000 * 60 * 45,
                 notes = "Instalación de fibra óptica autorizada por administración.",
                 authorizedBy = "Administración Prados"
+            ),
+            VisitorEntry(
+                folio = "VIS-2026-1046",
+                visitorName = "Uber Eats / Repartidor",
+                visitorType = "PAQUETERÍA",
+                destinationHouse = "Casa 09 · Cto. Los Encinos",
+                vehiclePlate = "NLD-44",
+                accessMethod = "Pase QR Temporal",
+                status = VisitorStatus.SALIDA,
+                checkInTimestamp = now - 1000 * 60 * 60,
+                checkOutTimestamp = now - 1000 * 60 * 50,
+                notes = "Entrega rápida de alimentos.",
+                authorizedBy = "Residente Casa 09"
+            ),
+            VisitorEntry(
+                folio = "VIS-2026-1047",
+                visitorName = "Dr. Roberto Garza",
+                visitorType = "VISITANTE",
+                destinationHouse = "Casa 77 · Cto. Prados Norte",
+                vehiclePlate = "MMX-99",
+                accessMethod = "Pase Pre-autorizado",
+                status = VisitorStatus.AUTORIZADO,
+                checkInTimestamp = now - 1000 * 60 * 5,
+                notes = "Visita médica programada.",
+                authorizedBy = "Familia Garza"
             )
         )
     }

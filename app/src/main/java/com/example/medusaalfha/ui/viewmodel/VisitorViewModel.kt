@@ -14,8 +14,8 @@ import kotlinx.coroutines.launch
 enum class VisitorFilterTab(val title: String) {
     ALL("Todos"),
     INSIDE("En Sitio"),
-    AUTHORIZED("Autorizados"),
-    CHECKED_OUT("Salidas")
+    CHECKED_OUT("Salidas"),
+    PACKAGES("Paquetería")
 }
 
 data class VisitorUiState(
@@ -35,6 +35,7 @@ data class VisitorUiState(
     val totalInsideCount: Int = 0,
     val totalTodayCount: Int = 0,
     val totalAuthorizedCount: Int = 0,
+    val totalCheckedOutCount: Int = 0,
     val isRefreshing: Boolean = false,
     val refreshFeedbackMessage: String? = null
 )
@@ -61,12 +62,14 @@ class VisitorViewModel(
                 .collect { list ->
                     val inside = list.count { it.status == VisitorStatus.DENTRO }
                     val auth = list.count { it.status == VisitorStatus.AUTORIZADO }
+                    val salio = list.count { it.status == VisitorStatus.SALIDA }
                     _uiState.value = _uiState.value.copy(
                         entries = list,
                         isLoading = false,
                         totalInsideCount = inside,
                         totalTodayCount = list.size,
-                        totalAuthorizedCount = auth
+                        totalAuthorizedCount = auth,
+                        totalCheckedOutCount = salio
                     )
                     applyFilters()
                 }
@@ -84,12 +87,14 @@ class VisitorViewModel(
                 onSuccess = { list ->
                     val inside = list.count { it.status == VisitorStatus.DENTRO }
                     val auth = list.count { it.status == VisitorStatus.AUTORIZADO }
+                    val salio = list.count { it.status == VisitorStatus.SALIDA }
                     _uiState.value = _uiState.value.copy(
                         entries = list,
                         isRefreshing = false,
                         totalInsideCount = inside,
                         totalTodayCount = list.size,
                         totalAuthorizedCount = auth,
+                        totalCheckedOutCount = salio,
                         refreshFeedbackMessage = "Bitácora actualizada en vivo desde Cloud Firestore"
                     )
                     applyFilters()
@@ -263,8 +268,17 @@ class VisitorViewModel(
         result = when (current.currentFilter) {
             VisitorFilterTab.ALL -> result
             VisitorFilterTab.INSIDE -> result.filter { it.status == VisitorStatus.DENTRO }
-            VisitorFilterTab.AUTHORIZED -> result.filter { it.status == VisitorStatus.AUTORIZADO }
             VisitorFilterTab.CHECKED_OUT -> result.filter { it.status == VisitorStatus.SALIDA }
+            VisitorFilterTab.PACKAGES -> result.filter {
+                it.visitorType.contains("paquet", ignoreCase = true) ||
+                it.visitorType.contains("entrega", ignoreCase = true) ||
+                it.visitorName.contains("amazon", ignoreCase = true) ||
+                it.visitorName.contains("mercado", ignoreCase = true) ||
+                it.visitorName.contains("logistics", ignoreCase = true) ||
+                it.visitorName.contains("dhl", ignoreCase = true) ||
+                it.visitorName.contains("fedex", ignoreCase = true) ||
+                (it.notes?.contains("paquet", ignoreCase = true) == true)
+            }
         }
 
         _uiState.value = current.copy(filteredEntries = result)

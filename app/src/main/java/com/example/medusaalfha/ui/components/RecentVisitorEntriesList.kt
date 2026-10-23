@@ -48,56 +48,62 @@ fun RecentVisitorEntriesList(
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        // Métricas rápidas superiores
-        VisitorSummaryMetricsRow(
-            totalInside = uiState.totalInsideCount,
-            totalToday = uiState.totalTodayCount,
-            totalAuthorized = uiState.totalAuthorizedCount
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Barra de búsqueda con botón de actualización manual y Escaneo QR integrado
+        // Header Táctico: VISITANTES RECIENTES • FIRESTORE
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedTextField(
-                value = uiState.searchQuery,
-                onValueChange = onSearchChanged,
-                placeholder = { Text("Buscar visita, casa, placa...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Buscar") },
-                trailingIcon = {
-                    if (uiState.searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { onSearchChanged("") }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Limpiar")
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "VISITANTES RECIENTES",
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.Black,
+                        color = GoldMetallic,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF042F2E),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, TealAccent.copy(alpha = 0.6f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(TealAccent)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "FIRESTORE",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TealAccent
+                            )
                         }
                     }
-                },
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 8.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = TealAccent,
-                    unfocusedBorderColor = BorderGray
-                ),
-                singleLine = true
-            )
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Bitácora en tiempo real · Los Prados Residencial",
+                    fontSize = 12.sp,
+                    color = CyberTextMuted
+                )
+            }
 
-            FilledTonalIconButton(
+            IconButton(
                 onClick = onRefresh,
                 modifier = Modifier
-                    .size(52.dp)
-                    .padding(end = 6.dp)
-                    .testTag("refresh_visitor_log_button"),
-                colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = CyberSurfaceElevated,
-                    contentColor = if (uiState.isRefreshing) NeonBlue else CyberTextMuted
-                ),
-                shape = RoundedCornerShape(12.dp)
+                    .size(40.dp)
+                    .testTag("refresh_visitor_log_button")
             ) {
                 if (uiState.isRefreshing) {
                     CircularProgressIndicator(
@@ -107,12 +113,89 @@ fun RecentVisitorEntriesList(
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Actualizar Bitácora desde Firestore",
+                        imageVector = Icons.Default.Sync,
+                        contentDescription = "Sincronizar",
+                        tint = GoldMetallic,
                         modifier = Modifier.size(24.dp)
                     )
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Métricas rápidas superiores (TOTAL HOY, EN SITIO, SALIDAS)
+        VisitorSummaryMetricsRow(
+            totalInside = uiState.totalInsideCount,
+            totalToday = uiState.totalTodayCount,
+            totalCheckedOut = uiState.totalCheckedOutCount
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Barra de búsqueda con botón de Escaneo QR integrado
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = CyberSurfaceElevated,
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberBorderCircuit)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Buscar",
+                        tint = GoldMetallic,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextField(
+                        value = uiState.searchQuery,
+                        onValueChange = onSearchChanged,
+                        placeholder = {
+                            Text(
+                                text = "Buscar por nombre, casa, placa o folio...",
+                                color = CyberTextMuted,
+                                fontSize = 13.sp
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent
+                        ),
+                        singleLine = true
+                    )
+                    if (uiState.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { onSearchChanged("") }) {
+                            Icon(
+                                Icons.Default.Clear,
+                                contentDescription = "Limpiar",
+                                tint = CyberTextMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
 
             FilledTonalIconButton(
                 onClick = onOpenScanner,
@@ -120,7 +203,7 @@ fun RecentVisitorEntriesList(
                     .size(52.dp)
                     .testTag("scan_qr_header_button"),
                 colors = IconButtonDefaults.filledTonalIconButtonColors(
-                    containerColor = TealAccent.copy(alpha = 0.15f),
+                    containerColor = TealAccent.copy(alpha = 0.2f),
                     contentColor = TealAccent
                 ),
                 shape = RoundedCornerShape(12.dp)
@@ -135,26 +218,47 @@ fun RecentVisitorEntriesList(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Pestañas de Filtro
-        ScrollableTabRow(
-            selectedTabIndex = uiState.currentFilter.ordinal,
-            edgePadding = 16.dp,
-            divider = {},
-            containerColor = Color.Transparent
+        // Pestañas de Filtro (Chips: Todos, En Sitio, Salidas, Paquetería)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             VisitorFilterTab.values().forEach { tab ->
                 val selected = uiState.currentFilter == tab
-                Tab(
-                    selected = selected,
-                    onClick = { onFilterSelected(tab) },
-                    text = {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (selected) GoldMetallic else CyberSurfaceElevated,
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (selected) GoldMetallic else CyberBorderCircuit
+                    ),
+                    modifier = Modifier
+                        .clickable { onFilterSelected(tab) }
+                        .testTag("filter_tab_${tab.name.lowercase()}")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (selected) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
                         Text(
                             text = tab.title,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selected) TealAccent else TextMuted
+                            fontSize = 12.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) Color.Black else CyberTextMuted
                         )
                     }
-                )
+                }
             }
         }
 
@@ -277,7 +381,7 @@ fun RecentVisitorEntriesList(
 fun VisitorSummaryMetricsRow(
     totalInside: Int,
     totalToday: Int,
-    totalAuthorized: Int
+    totalCheckedOut: Int
 ) {
     Row(
         modifier = Modifier
@@ -286,21 +390,21 @@ fun VisitorSummaryMetricsRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         MetricCard(
-            label = "En Sitio",
-            value = totalInside.toString(),
-            color = StatusGreen,
-            modifier = Modifier.weight(1f)
-        )
-        MetricCard(
-            label = "Autorizados",
-            value = totalAuthorized.toString(),
-            color = Color(0xFF2563EB),
-            modifier = Modifier.weight(1f)
-        )
-        MetricCard(
-            label = "Total Hoy",
+            label = "TOTAL HOY",
             value = totalToday.toString(),
-            color = NavyPrimary,
+            color = Color.White,
+            modifier = Modifier.weight(1f)
+        )
+        MetricCard(
+            label = "EN SITIO",
+            value = totalInside.toString(),
+            color = EmeraldGreen,
+            modifier = Modifier.weight(1f)
+        )
+        MetricCard(
+            label = "SALIDAS",
+            value = totalCheckedOut.toString(),
+            color = NeonBlue,
             modifier = Modifier.weight(1f)
         )
     }
@@ -315,16 +419,28 @@ fun MetricCard(
 ) {
     Surface(
         shape = RoundedCornerShape(12.dp),
-        color = Color.White,
-        shadowElevation = 1.dp,
+        color = CyberSurfaceElevated,
+        border = androidx.compose.foundation.BorderStroke(1.dp, CyberBorderCircuit),
         modifier = modifier
     ) {
         Column(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(text = value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color)
-            Text(text = label, fontSize = 11.sp, color = TextMuted)
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = CyberTextMuted,
+                letterSpacing = 0.5.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = value,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
+                color = color
+            )
         }
     }
 }
@@ -335,13 +451,19 @@ fun VisitorEntryCard(
     onClick: () -> Unit,
     onCheckOut: () -> Unit
 ) {
-    Card(
+    val isPackage = entry.visitorType.contains("paquet", ignoreCase = true) ||
+            entry.visitorName.contains("amazon", ignoreCase = true) ||
+            entry.visitorName.contains("mercado", ignoreCase = true) ||
+            entry.visitorName.contains("logistics", ignoreCase = true)
+
+    Surface(
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        color = CyberSurfaceElevated,
+        border = androidx.compose.foundation.BorderStroke(1.dp, CyberBorderCircuit),
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .testTag("visitor_card_${entry.folio}")
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -349,32 +471,39 @@ fun VisitorEntryCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Box(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(TealAccent.copy(alpha = 0.12f)),
+                            .background(
+                                if (isPackage) Color(0xFF1E293B) else TealAccent.copy(alpha = 0.15f)
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Person,
+                            imageVector = if (isPackage) Icons.Default.LocalShipping else Icons.Default.Person,
                             contentDescription = null,
-                            tint = TealAccent,
+                            tint = if (isPackage) Color(0xFF38BDF8) else TealAccent,
                             modifier = Modifier.size(20.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
+                            text = if (isPackage) "PAQUETERÍA • ${entry.folio}" else "VISITANTE • ${entry.folio}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CyberTextMuted
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
                             text = entry.visitorName,
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = NavyPrimary
-                        )
-                        Text(
-                            text = "${entry.visitorType} · Folio: ${entry.folio}",
-                            fontSize = 11.sp,
-                            color = TextMuted
+                            color = Color.White
                         )
                     }
                 }
@@ -384,6 +513,26 @@ fun VisitorEntryCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            // Destino con icono de casa en cyan
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Home,
+                    contentDescription = null,
+                    tint = Color(0xFF38BDF8),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = entry.destinationHouse,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF38BDF8)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Horario y Placas
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -391,65 +540,53 @@ fun VisitorEntryCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.Home,
+                        imageVector = Icons.Default.Schedule,
                         contentDescription = null,
-                        tint = TextMuted,
-                        modifier = Modifier.size(16.dp)
+                        tint = CyberTextMuted,
+                        modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = entry.destinationHouse,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = NavyPrimary
+                        text = "${entry.formattedTime} (${entry.relativeTimeAgo})",
+                        fontSize = 11.sp,
+                        color = CyberTextMuted
                     )
                 }
 
                 if (!entry.vehiclePlate.isNullOrBlank()) {
                     Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color(0xFFF1F5F9),
-                        modifier = Modifier.padding(start = 4.dp)
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF1E293B),
+                        border = androidx.compose.foundation.BorderStroke(0.8.dp, Color(0xFF334155))
                     ) {
                         Text(
                             text = entry.vehiclePlate,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = NavyPrimary,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Ingreso: ${entry.formattedTime} (${entry.relativeTimeAgo})",
-                    fontSize = 11.sp,
-                    color = TextMuted
-                )
-
-                if (entry.status == VisitorStatus.DENTRO) {
-                    OutlinedButton(
-                        onClick = onCheckOut,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusAmber)
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                            contentDescription = "Salida",
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Marcar Salida", fontSize = 11.sp)
-                    }
+            if (entry.status == VisitorStatus.DENTRO) {
+                Spacer(modifier = Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onCheckOut,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = StatusAmber),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, StatusAmber.copy(alpha = 0.5f)),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                        contentDescription = "Marcar Salida",
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Marcar Salida", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -458,22 +595,22 @@ fun VisitorEntryCard(
 
 @Composable
 fun VisitorStatusBadge(status: VisitorStatus) {
-    val (bgColor, textColor) = when (status) {
-        VisitorStatus.DENTRO -> Color(0xFFDCFCE7) to StatusGreen
-        VisitorStatus.SALIDA -> Color(0xFFF1F5F9) to TextMuted
-        VisitorStatus.AUTORIZADO -> Color(0xFFDBEAFE) to Color(0xFF1D4ED8)
-        VisitorStatus.DENEGADO -> Color(0xFFFEE2E2) to StatusRed
+    val (label, bg, fg) = when (status) {
+        VisitorStatus.DENTRO -> Triple("• En Sitio", Color(0xFF064E3B), EmeraldGreen)
+        VisitorStatus.SALIDA -> Triple("• Salida Registrada", Color(0xFF1E293B), Color(0xFF94A3B8))
+        VisitorStatus.AUTORIZADO -> Triple("• Autorizado", Color(0xFF1E3A8A), Color(0xFF60A5FA))
+        VisitorStatus.DENEGADO -> Triple("• Denegado", Color(0xFF450A0A), AlertRed)
     }
 
     Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = bgColor
+        shape = RoundedCornerShape(12.dp),
+        color = bg
     ) {
         Text(
-            text = status.label,
+            text = label,
             fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = textColor,
+            fontWeight = FontWeight.Bold,
+            color = fg,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
         )
     }
