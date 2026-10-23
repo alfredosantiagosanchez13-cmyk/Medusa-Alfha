@@ -13,7 +13,7 @@ data class ParsedVisitorPass(
     val authorizedBy: String = "Pase QR Digital",
     val rawContent: String = ""
 ) {
-    fun toVisitorEntry(): VisitorEntry {
+    fun toVisitorEntry(status: VisitorStatus = VisitorStatus.DENTRO): VisitorEntry {
         return VisitorEntry(
             folio = folio.ifEmpty { "QR-${System.currentTimeMillis() % 100000}" },
             visitorName = visitorName.ifEmpty { "Visitante QR" },
@@ -21,9 +21,10 @@ data class ParsedVisitorPass(
             destinationHouse = destinationHouse.ifEmpty { "Casa Prados" },
             vehiclePlate = vehiclePlate,
             accessMethod = "Código QR Escaneado",
-            status = VisitorStatus.DENTRO,
+            status = status,
             checkInTimestamp = System.currentTimeMillis(),
-            notes = notes ?: "Ingreso validado mediante lector QR de caseta",
+            checkOutTimestamp = if (status == VisitorStatus.SALIDA) System.currentTimeMillis() else null,
+            notes = notes ?: "Acceso validado mediante lector QR de caseta",
             authorizedBy = authorizedBy
         )
     }
@@ -80,18 +81,20 @@ data class ParsedVisitorPass(
                 )
             }
 
-            // 3. Delimitado por '|' o ';' (ej. FOL-202|Roberto Gómez|Casa 54|NZA-88-21)
+            // 3. Delimitado por '|' o ';' (ej. FOL-202|Roberto Gómez|Casa 54|NZA-88-21|Cita)
             val parts = if (trimmed.contains("|")) trimmed.split("|") else trimmed.split(";")
             if (parts.size >= 2) {
                 val folio = parts[0].trim()
                 val name = parts.getOrNull(1)?.trim() ?: "Visitante"
                 val house = parts.getOrNull(2)?.trim() ?: "Casa Prados"
                 val plate = parts.getOrNull(3)?.trim()?.ifEmpty { null }
+                val notes = parts.getOrNull(4)?.trim()?.ifEmpty { null }
                 return ParsedVisitorPass(
                     folio = folio.ifEmpty { "QR-${System.currentTimeMillis() % 100000}" },
                     visitorName = name,
                     destinationHouse = house,
                     vehiclePlate = plate,
+                    notes = notes,
                     rawContent = trimmed
                 )
             }

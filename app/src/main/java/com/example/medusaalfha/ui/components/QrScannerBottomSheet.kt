@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,6 +36,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.medusaalfha.data.scanner.ParsedVisitorPass
 import com.example.medusaalfha.data.scanner.QrCodeImageAnalyzer
 import com.example.medusaalfha.ui.theme.NavyPrimary
+import com.example.medusaalfha.ui.theme.StatusAmber
 import com.example.medusaalfha.ui.theme.StatusGreen
 import com.example.medusaalfha.ui.theme.TealAccent
 import java.util.concurrent.Executors
@@ -45,6 +47,8 @@ fun QrScannerBottomSheet(
     onDismiss: () -> Unit,
     onQrScanned: (String) -> Unit,
     scannedPass: ParsedVisitorPass?,
+    isPassAlreadyInside: Boolean = false,
+    isConfirming: Boolean = false,
     onConfirmPass: () -> Unit,
     onDismissPass: () -> Unit
 ) {
@@ -210,6 +214,10 @@ fun QrScannerBottomSheet(
             // Resultado del Escaneo / Confirmación de Pase
             AnimatedVisibility(visible = scannedPass != null) {
                 scannedPass?.let { pass ->
+                    val actionColor = if (isPassAlreadyInside) StatusAmber else TealAccent
+                    val statusIcon = if (isPassAlreadyInside) Icons.AutoMirrored.Filled.ExitToApp else Icons.Default.CheckCircle
+                    val statusLabel = if (isPassAlreadyInside) "Visita en Sitio · Salida" else "Pase Autorizado · Ingreso"
+
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = Color(0xFF1E293B),
@@ -225,27 +233,28 @@ fun QrScannerBottomSheet(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        imageVector = Icons.Default.CheckCircle,
+                                        imageVector = statusIcon,
                                         contentDescription = null,
-                                        tint = StatusGreen,
+                                        tint = if (isPassAlreadyInside) StatusAmber else StatusGreen,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "Pase QR Detectado",
+                                        text = statusLabel,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White
+                                        color = Color.White,
+                                        fontSize = 14.sp
                                     )
                                 }
                                 Surface(
                                     shape = RoundedCornerShape(6.dp),
-                                    color = TealAccent.copy(alpha = 0.2f)
+                                    color = actionColor.copy(alpha = 0.2f)
                                 ) {
                                     Text(
-                                        text = "Folio: ${pass.folio}",
+                                        text = if (isPassAlreadyInside) "Folio: ${pass.folio} (DENTRO)" else "Folio: ${pass.folio}",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = TealAccent,
+                                        color = actionColor,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                     )
                                 }
@@ -260,7 +269,7 @@ fun QrScannerBottomSheet(
                                 color = Color.White
                             )
                             Text(
-                                text = "Destino: ${pass.destinationHouse}",
+                                text = "Destino: Casa ${pass.destinationHouse}",
                                 fontSize = 13.sp,
                                 color = Color(0xFF94A3B8)
                             )
@@ -273,7 +282,40 @@ fun QrScannerBottomSheet(
                                 )
                             }
 
-                            Spacer(modifier = Modifier.height(14.dp))
+                            // Banner contextual de acción (Ingreso vs Salida)
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = actionColor.copy(alpha = 0.12f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    actionColor.copy(alpha = 0.4f)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = if (isPassAlreadyInside) Icons.Default.Info else Icons.Default.NotificationsActive,
+                                        contentDescription = null,
+                                        tint = actionColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (isPassAlreadyInside)
+                                            "El pase ya cuenta con registro previo en el condominio. Al confirmar se registrará la SALIDA."
+                                        else
+                                            "Al confirmar se registrará el INGRESO en Firestore y se enviará alerta en tiempo real a Casa ${pass.destinationHouse}.",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFFE2E8F0),
+                                        lineHeight = 15.sp
+                                    )
+                                }
+                            }
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -281,6 +323,7 @@ fun QrScannerBottomSheet(
                             ) {
                                 OutlinedButton(
                                     onClick = onDismissPass,
+                                    enabled = !isConfirming,
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier
                                         .weight(1f)
@@ -292,15 +335,37 @@ fun QrScannerBottomSheet(
 
                                 Button(
                                     onClick = onConfirmPass,
+                                    enabled = !isConfirming,
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier
-                                        .weight(1f)
+                                        .weight(1.3f)
                                         .testTag("confirm_scan_button"),
-                                    colors = ButtonDefaults.buttonColors(containerColor = TealAccent)
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = actionColor,
+                                        contentColor = Color.White
+                                    )
                                 ) {
-                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Dar Acceso")
+                                    if (isConfirming) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = Color.White,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Guardando...", fontSize = 13.sp)
+                                    } else {
+                                        Icon(
+                                            imageVector = if (isPassAlreadyInside) Icons.AutoMirrored.Filled.ExitToApp else Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (isPassAlreadyInside) "Marcar Salida" else "Confirmar Ingreso",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                    }
                                 }
                             }
                         }

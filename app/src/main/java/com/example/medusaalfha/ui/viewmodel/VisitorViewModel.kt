@@ -29,6 +29,8 @@ data class VisitorUiState(
     val isAlertsSheetOpen: Boolean = false,
     val isScannerOpen: Boolean = false,
     val scannedPass: com.example.medusaalfha.data.scanner.ParsedVisitorPass? = null,
+    val isPassAlreadyInside: Boolean = false,
+    val isConfirmingPass: Boolean = false,
     val scanSuccessMessage: String? = null,
     val totalInsideCount: Int = 0,
     val totalTodayCount: Int = 0,
@@ -167,36 +169,70 @@ class VisitorViewModel(
 
     fun onQrCodeScanned(qrRawText: String) {
         val parsed = com.example.medusaalfha.data.scanner.ParsedVisitorPass.parse(qrRawText)
-        _uiState.value = _uiState.value.copy(
-            scannedPass = parsed
-        )
-    }
-
-    fun confirmScannedPass(context: android.content.Context) {
-        val pass = _uiState.value.scannedPass ?: return
-        val entry = pass.toVisitorEntry()
         viewModelScope.launch {
-            repository.registerVisitorEntry(entry)
-            try {
-                alertRepository.dispatchVisitorArrivalAlert(
-                    context = context,
-                    visitorName = entry.visitorName,
-                    destinationHouse = entry.destinationHouse,
-                    folio = entry.folio,
-                    vehiclePlate = entry.vehiclePlate
-                )
-            } catch (_: Exception) {}
-
+            val status = repository.checkVisitorCurrentStatus(parsed.folio)
+            val isInside = status == com.example.medusaalfha.data.model.VisitorStatus.DENTRO
             _uiState.value = _uiState.value.copy(
-                isScannerOpen = false,
-                scannedPass = null,
-                scanSuccessMessage = "¡Acceso concedido para ${entry.visitorName} (${entry.destinationHouse})!"
+                scannedPass = parsed,
+                isPassAlreadyInside = isInside
             )
         }
     }
 
+    fun confirmScannedPass(context: android.content.Context) {
+        val pass = _uiState.value.scannedPass ?: return
+        val isInside = _uiState.value.isPassAlreadyInside
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isConfirmingPass = true)
+
+            if (isInside) {
+                // Registrar Salida del visitante en Firestore
+                repository.markVisitorCheckOut(pass.folio)
+                try {
+                    alertRepository.dispatchVisitorArrivalAlert(
+                        context = context,
+                        visitorName = pass.visitorName,
+                        destinationHouse = pass.destinationHouse,
+                        folio = pass.folio,
+                        vehiclePlate = pass.vehiclePlate
+                    )
+                } catch (_: Exception) {}
+
+                _uiState.value = _uiState.value.copy(
+                    isScannerOpen = false,
+                    scannedPass = null,
+                    isPassAlreadyInside = false,
+                    isConfirmingPass = false,
+                    scanSuccessMessage = "¡Salida registrada para ${pass.visitorName} (${pass.destinationHouse})!"
+                )
+            } else {
+                // Registrar Ingreso del visitante en Firestore
+                val entry = pass.toVisitorEntry(com.example.medusaalfha.data.model.VisitorStatus.DENTRO)
+                repository.registerVisitorEntry(entry)
+                try {
+                    alertRepository.dispatchVisitorArrivalAlert(
+                        context = context,
+                        visitorName = entry.visitorName,
+                        destinationHouse = entry.destinationHouse,
+                        folio = entry.folio,
+                        vehiclePlate = entry.vehiclePlate
+                    )
+                } catch (_: Exception) {}
+
+                _uiState.value = _uiState.value.copy(
+                    isScannerOpen = false,
+                    scannedPass = null,
+                    isPassAlreadyInside = false,
+                    isConfirmingPass = false,
+                    scanSuccessMessage = "¡Ingreso confirmado para ${entry.visitorName} (${entry.destinationHouse})!"
+                )
+            }
+        }
+    }
+
     fun dismissScannedPass() {
-        _uiState.value = _uiState.value.copy(scannedPass = null)
+        _uiState.value = _uiState.value.copy(scannedPass = null, isPassAlreadyInside = false)
     }
 
     fun clearScanSuccessMessage() {

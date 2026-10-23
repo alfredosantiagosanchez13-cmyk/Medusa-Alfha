@@ -1,0 +1,6 @@
+{
+  "summary":  "Plan de implementación para el escáner de códigos QR con CameraX y persistencia en Cloud Firestore, integrando confirmación táctica del guardia, conmutación automática de entrada/salida y emisión de alertas en tiempo real a residentes.",
+  "updatedAt":  "2026-10-22T03:20:23.540441527Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

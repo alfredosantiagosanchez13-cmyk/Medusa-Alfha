@@ -180,6 +180,41 @@ class VisitorRepository(
     }
 
     /**
+     * Consulta el estado actual de un folio de visitante para determinar si ya ingresó.
+     */
+    suspend fun checkVisitorCurrentStatus(
+        folio: String,
+        condominiumId: String = DEFAULT_CONDOMINIUM_ID
+    ): VisitorStatus? {
+        synchronized(inMemoryFallbackList) {
+            val local = inMemoryFallbackList.find { it.folio.equals(folio, ignoreCase = true) }
+            if (local != null) return local.status
+        }
+
+        return try {
+            val doc = firestore.collection(COLLECTION_CONDOMINIUMS)
+                .document(condominiumId)
+                .collection(SUBCOLLECTION_VISITORS)
+                .document(folio)
+                .get()
+                .await()
+            if (doc.exists()) {
+                val statusStr = doc.getString("status") ?: "DENTRO"
+                try {
+                    VisitorStatus.valueOf(statusStr)
+                } catch (_: Exception) {
+                    VisitorStatus.DENTRO
+                }
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error consultando estado de visitante en Firestore: ${e.message}")
+            null
+        }
+    }
+
+    /**
      * Inicializa datos de muestra en Firestore si aún no se han subido.
      */
     suspend fun seedInitialDataIfEmpty() {

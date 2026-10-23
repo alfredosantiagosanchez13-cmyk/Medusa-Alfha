@@ -359,6 +359,8 @@ fun MainAppContainer(
                     onDismiss = { visitorViewModel.setScannerOpen(false) },
                     onQrScanned = { qrResult -> visitorViewModel.onQrCodeScanned(qrResult) },
                     scannedPass = visitorUiState.scannedPass,
+                    isPassAlreadyInside = visitorUiState.isPassAlreadyInside,
+                    isConfirming = visitorUiState.isConfirmingPass,
                     onConfirmPass = { visitorViewModel.confirmScannedPass(context) },
                     onDismissPass = { visitorViewModel.dismissScannedPass() }
                 )
