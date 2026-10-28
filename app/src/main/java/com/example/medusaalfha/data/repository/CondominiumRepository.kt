@@ -13,8 +13,13 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 
 class CondominiumRepository(
-    private val firestore: FirebaseFirestore = FirebaseFirestore.getInstance()
+    private val firestoreProvider: () -> FirebaseFirestore = {
+        val app = com.example.medusaalfha.MedusaApplication.instance
+            ?: throw IllegalStateException("MedusaApplication instance not ready")
+        com.example.medusaalfha.data.firebase.FirebaseProvider.getFirestore(app)
+    }
 ) {
+    private val firestore by lazy { firestoreProvider() }
     companion object {
         private const val TAG = "CondominiumRepo"
         const val COLLECTION_CONDOMINIUMS = "condominiums"

@@ -1,8 +1,15 @@
 package com.example.medusaalfha
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -20,6 +27,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 import com.example.medusaalfha.ui.components.AmenityBookingCalendarHub
 import com.example.medusaalfha.ui.components.RecentVisitorEntriesList
@@ -36,6 +44,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             MEDUSAALFHATheme {
                 AppRootContent(
@@ -89,6 +98,29 @@ fun MainAppContainer(
     val coroutineScope = rememberCoroutineScope()
     val credentialManager = remember { androidx.credentials.CredentialManager.create(context) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Solicitar permiso de notificaciones en Android 13+ (API 33+)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val notificationPermissionLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission()
+        ) { /* Granted or denied */ }
+
+        LaunchedEffect(Unit) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    // Manejo de navegación con botón Atrás del sistema (BackHandler)
+    BackHandler(enabled = visitorUiState.isAlertsSheetOpen || visitorUiState.isScannerOpen || showBiometricModal || currentScreen != MedusaScreen.VISITORS) {
+        when {
+            visitorUiState.isAlertsSheetOpen -> visitorViewModel.setAlertsSheetOpen(false)
+            visitorUiState.isScannerOpen -> visitorViewModel.setScannerOpen(false)
+            showBiometricModal -> showBiometricModal = false
+            currentScreen != MedusaScreen.VISITORS -> currentScreen = MedusaScreen.VISITORS
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -243,21 +275,30 @@ fun MainAppContainer(
                     )
                 )
 
-                if (isMasterUnlocked) {
-                    NavigationBarItem(
-                        selected = currentScreen == MedusaScreen.MASTER_PANEL,
-                        onClick = { currentScreen = MedusaScreen.MASTER_PANEL },
-                        icon = { Icon(Icons.Default.AdminPanelSettings, contentDescription = "ALFHA Master") },
-                        label = { Text("Master") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = GoldMetallic,
-                            selectedTextColor = GoldMetallic,
-                            unselectedIconColor = CyberTextMuted,
-                            unselectedTextColor = CyberTextMuted,
-                            indicatorColor = GoldMetallic.copy(alpha = 0.2f)
+                NavigationBarItem(
+                    selected = currentScreen == MedusaScreen.MASTER_PANEL,
+                    onClick = {
+                        if (isMasterUnlocked) {
+                            currentScreen = MedusaScreen.MASTER_PANEL
+                        } else {
+                            showBiometricModal = true
+                        }
+                    },
+                    icon = {
+                        Icon(
+                            imageVector = if (isMasterUnlocked) Icons.Default.AdminPanelSettings else Icons.Default.Fingerprint,
+                            contentDescription = "ALFHA Master"
                         )
+                    },
+                    label = { Text("ALFHA Master") },
+                    colors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = GoldMetallic,
+                        selectedTextColor = GoldMetallic,
+                        unselectedIconColor = if (isMasterUnlocked) GoldMetallic.copy(alpha = 0.7f) else CyberTextMuted,
+                        unselectedTextColor = if (isMasterUnlocked) GoldMetallic.copy(alpha = 0.7f) else CyberTextMuted,
+                        indicatorColor = GoldMetallic.copy(alpha = 0.2f)
                     )
-                }
+                )
             }
         },
         floatingActionButton = {

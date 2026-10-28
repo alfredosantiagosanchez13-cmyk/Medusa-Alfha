@@ -37,16 +37,18 @@ class QrCodeImageAnalyzer(
             return
         }
 
-        val buffer: ByteBuffer = image.planes[0].buffer
+        val yPlane = image.planes[0]
+        val buffer: ByteBuffer = yPlane.buffer
         val data = ByteArray(buffer.remaining())
         buffer.get(data)
 
+        val rowStride = yPlane.rowStride
         val width = image.width
         val height = image.height
 
         val source = PlanarYUVLuminanceSource(
             data,
-            width,
+            rowStride,
             height,
             0,
             0,

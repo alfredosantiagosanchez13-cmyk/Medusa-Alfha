@@ -690,10 +690,10 @@ fun DetailFieldRow(label: String, value: String, icon: androidx.compose.ui.graph
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(imageVector = icon, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+        Icon(imageVector = icon, contentDescription = null, tint = NeonBlue, modifier = Modifier.size(18.dp))
         Spacer(modifier = Modifier.width(10.dp))
-        Text(text = "$label: ", fontSize = 13.sp, color = TextMuted)
-        Text(text = value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = NavyPrimary)
+        Text(text = "$label: ", fontSize = 13.sp, color = CyberTextMuted)
+        Text(text = value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
     }
 }
 
@@ -709,35 +709,75 @@ fun QuickAddVisitorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Registrar Ingreso Rápido", fontWeight = FontWeight.Bold) },
+        containerColor = CyberSurface,
+        shape = RoundedCornerShape(16.dp),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.PersonAdd, contentDescription = null, tint = GoldMetallic)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Registrar Ingreso Rápido", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Nombre del Visitante *") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = NeonBlue,
+                        unfocusedBorderColor = CyberBorderCircuit,
+                        focusedLabelColor = NeonBlue,
+                        unfocusedLabelColor = CyberTextMuted
+                    ),
+                    modifier = Modifier.fillMaxWidth().testTag("input_quick_visitor_name")
                 )
                 OutlinedTextField(
                     value = house,
                     onValueChange = { house = it },
                     label = { Text("Vivienda Destino * (ej. Casa 54)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = NeonBlue,
+                        unfocusedBorderColor = CyberBorderCircuit,
+                        focusedLabelColor = NeonBlue,
+                        unfocusedLabelColor = CyberTextMuted
+                    ),
+                    modifier = Modifier.fillMaxWidth().testTag("input_quick_visitor_house")
                 )
                 OutlinedTextField(
                     value = plate,
                     onValueChange = { plate = it },
                     label = { Text("Placas (opcional)") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = NeonBlue,
+                        unfocusedBorderColor = CyberBorderCircuit,
+                        focusedLabelColor = NeonBlue,
+                        unfocusedLabelColor = CyberTextMuted
+                    ),
+                    modifier = Modifier.fillMaxWidth().testTag("input_quick_visitor_plate")
                 )
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
                     label = { Text("Observaciones (opcional)") },
-                    modifier = Modifier.fillMaxWidth()
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = NeonBlue,
+                        unfocusedBorderColor = CyberBorderCircuit,
+                        focusedLabelColor = NeonBlue,
+                        unfocusedLabelColor = CyberTextMuted
+                    ),
+                    modifier = Modifier.fillMaxWidth().testTag("input_quick_visitor_notes")
                 )
             }
         },
@@ -745,13 +785,15 @@ fun QuickAddVisitorDialog(
             Button(
                 onClick = { onConfirm(name, house, plate, notes) },
                 enabled = name.isNotBlank() && house.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(containerColor = TealAccent)
+                colors = ButtonDefaults.buttonColors(containerColor = GoldMetallic, contentColor = Color.Black),
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier.testTag("btn_confirm_quick_visitor")
             ) {
-                Text("Registrar")
+                Text("Registrar", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancelar") }
+            TextButton(onClick = onDismiss) { Text("Cancelar", color = CyberTextMuted) }
         }
     )
 }
@@ -772,24 +814,42 @@ fun EmptyVisitorEntriesView(
         Icon(
             imageVector = Icons.Default.SearchOff,
             contentDescription = null,
-            tint = TextMuted,
+            tint = CyberTextMuted,
             modifier = Modifier.size(48.dp)
         )
         Spacer(modifier = Modifier.height(12.dp))
         Text(
             text = if (searchQuery.isNotEmpty()) "No se encontraron visitantes coincidentes" else "No hay registros disponibles",
-            color = NavyPrimary,
-            fontWeight = FontWeight.Medium
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp
         )
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = if (searchQuery.isNotEmpty()) "Prueba con otro término de búsqueda o folio" else "Los ingresos de caseta y pases QR se listarán aquí",
+            color = CyberTextMuted,
+            fontSize = 12.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(14.dp))
         if (searchQuery.isNotEmpty()) {
-            TextButton(onClick = onClearSearch) { Text("Limpiar Filtros") }
+            OutlinedButton(
+                onClick = onClearSearch,
+                border = androidx.compose.foundation.BorderStroke(1.dp, NeonBlue),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = NeonBlue),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Limpiar Filtros")
+            }
         } else {
             Button(
                 onClick = onOpenAddDialog,
-                colors = ButtonDefaults.buttonColors(containerColor = TealAccent)
+                colors = ButtonDefaults.buttonColors(containerColor = GoldMetallic, contentColor = Color.Black),
+                shape = RoundedCornerShape(10.dp)
             ) {
-                Text("Registrar Primer Acceso")
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Registrar Primer Acceso", fontWeight = FontWeight.Bold)
             }
         }
     }
