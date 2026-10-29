@@ -104,6 +104,7 @@ dependencies {
   implementation(libs.firebase.messaging)
   implementation(libs.androidx.navigation.compose)
   implementation(libs.firebase.appcheck.recaptcha)
+  implementation(libs.firebase.appcheck.playintegrity)
   implementation(libs.firebase.appcheck.debug)
   implementation(libs.androidx.camera.core)
   implementation(libs.androidx.camera.camera2)

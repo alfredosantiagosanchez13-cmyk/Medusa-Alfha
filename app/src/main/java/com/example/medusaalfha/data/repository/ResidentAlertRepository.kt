@@ -32,16 +32,13 @@ class ResidentAlertRepository(
 
     private val inMemoryAlerts = mutableListOf<ResidentAlert>()
 
-    init {
-        inMemoryAlerts.addAll(generateInitialSampleAlerts())
-    }
-
     /**
      * Flujo de alertas en tiempo real desde Firestore.
      */
     fun getAlertsFlow(condominiumId: String = DEFAULT_CONDOMINIUM_ID): Flow<List<ResidentAlert>> = callbackFlow {
-        // Emitir estado en memoria de forma inmediata
-        trySend(inMemoryAlerts.toList())
+        // Emitir estado en memoria actual (inicia vacío para reflejar datos reales de Firestore)
+        val initialList = synchronized(inMemoryAlerts) { inMemoryAlerts.toList() }
+        trySend(initialList)
 
         var listener: com.google.firebase.firestore.ListenerRegistration? = null
         try {
@@ -53,8 +50,9 @@ class ResidentAlertRepository(
 
             listener = collectionRef.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.w(TAG, "Error leyendo alertas de Firestore: ${error.message}")
-                    trySend(inMemoryAlerts.toList())
+                    val code = (error as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: "UNKNOWN"
+                    Log.e(TAG, "FIRESTORE ERROR en getAlertsFlow [code=$code]: ${error.message}", error)
+                    trySend(synchronized(inMemoryAlerts) { inMemoryAlerts.toList() })
                     return@addSnapshotListener
                 }
 
@@ -66,14 +64,18 @@ class ResidentAlertRepository(
                         inMemoryAlerts.clear()
                         inMemoryAlerts.addAll(cloudList)
                     }
+                    Log.d(TAG, "Firestore devolvió ${cloudList.size} alertas reales para $condominiumId.")
                     trySend(cloudList)
                 } else {
-                    trySend(inMemoryAlerts.toList())
+                    Log.d(TAG, "Firestore: colección $SUB_ALERTS vacía para $condominiumId (0 alertas encontradas).")
+                    synchronized(inMemoryAlerts) { inMemoryAlerts.clear() }
+                    trySend(emptyList())
                 }
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "Excepción al registrar listener de alertas: ${t.message}")
-            trySend(inMemoryAlerts.toList())
+            val code = (t as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: t.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE EXCEPTION al registrar listener de alertas [code=$code]: ${t.message}", t)
+            trySend(synchronized(inMemoryAlerts) { inMemoryAlerts.toList() })
         }
 
         awaitClose { listener?.remove() }
@@ -127,7 +129,8 @@ class ResidentAlertRepository(
             Log.d(TAG, "Alerta de visitante guardada en Firestore: ${alert.id}")
             Result.success(alert)
         } catch (e: Exception) {
-            Log.w(TAG, "Alerta activa localmente: ${e.message}")
+            val code = (e as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: e.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE ERROR guardando alerta de visitante [code=$code]: ${e.message}", e)
             Result.success(alert)
         }
     }
@@ -178,7 +181,8 @@ class ResidentAlertRepository(
             Log.d(TAG, "Alerta de reserva guardada en Firestore: ${alert.id}")
             Result.success(alert)
         } catch (e: Exception) {
-            Log.w(TAG, "Alerta de reserva activa localmente: ${e.message}")
+            val code = (e as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: e.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE ERROR guardando alerta de reserva [code=$code]: ${e.message}", e)
             Result.success(alert)
         }
     }

@@ -56,7 +56,8 @@ class CondominiumRepository(
             listenerRegistration = firestore.collection(COLLECTION_CONDOMINIUMS)
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
-                        Log.w(TAG, "Error escuchando condominios de Firestore: ${error.message}")
+                        val code = (error as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: "UNKNOWN"
+                        Log.e(TAG, "FIRESTORE ERROR en getCondominiumsFlow [code=$code]: ${error.message}", error)
                         trySend(inMemoryFallbackList.toList())
                         return@addSnapshotListener
                     }
@@ -69,13 +70,16 @@ class CondominiumRepository(
                             inMemoryFallbackList.clear()
                             inMemoryFallbackList.addAll(list)
                         }
+                        Log.d(TAG, "Firestore devolvió ${list.size} condominios registrados.")
                         trySend(list)
                     } else {
+                        Log.d(TAG, "Firestore: colección $COLLECTION_CONDOMINIUMS vacía.")
                         trySend(inMemoryFallbackList.toList())
                     }
                 }
         } catch (t: Throwable) {
-            Log.w(TAG, "Fallo conectando a Firestore: ${t.message}")
+            val code = (t as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: t.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE EXCEPTION conectando a condominios [code=$code]: ${t.message}", t)
             trySend(inMemoryFallbackList.toList())
         }
 

@@ -5,20 +5,17 @@ import android.util.Log
 import com.example.medusaalfha.BuildConfig
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
-import com.google.firebase.appcheck.recaptcha.RecaptchaAppCheckProviderFactory
+import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 
 /**
- * Gestor de Firebase App Check con reCAPTCHA Enterprise.
+ * Gestor de Firebase App Check con Play Integrity en Release y DebugProvider en Debug.
  * Protege los endpoints y llamadas a Cloud Firestore, asegurando que solo
  * los clientes autorizados y dispositivos válidos interactúen con la base de datos.
  */
 object AppCheckHelper {
     private const val TAG = "AppCheckHelper"
-    
-    // Identificador de sitio reCAPTCHA Enterprise para el proyecto medusa-alfha
-    private const val DEFAULT_RECAPTCHA_SITE_KEY = "6LcvkLAqAAAAAI3k_medusa_enterprise_site_key"
 
-    fun initializeAppCheck(context: Context, siteKey: String? = null) {
+    fun initializeAppCheck(context: Context) {
         try {
             val appCheck = FirebaseAppCheck.getInstance()
 
@@ -27,20 +24,16 @@ object AppCheckHelper {
                 appCheck.installAppCheckProviderFactory(
                     DebugAppCheckProviderFactory.getInstance()
                 )
-                Log.d(TAG, "Firebase App Check activo con DebugAppCheckProviderFactory.")
+                Log.d(TAG, "Firebase App Check activo con DebugAppCheckProviderFactory (DEBUG buildType).")
             } else {
-                // Modo Producción Release: reCAPTCHA Enterprise Provider Factory
-                val resolvedSiteKey = siteKey 
-                    ?: getSiteKeyFromResources(context) 
-                    ?: DEFAULT_RECAPTCHA_SITE_KEY
-
+                // Modo Producción Release: Google Play Integrity Provider Factory
                 appCheck.installAppCheckProviderFactory(
-                    RecaptchaAppCheckProviderFactory.getInstance(resolvedSiteKey)
+                    PlayIntegrityAppCheckProviderFactory.getInstance()
                 )
-                Log.d(TAG, "Firebase App Check activo con reCAPTCHA Enterprise Provider.")
+                Log.d(TAG, "Firebase App Check activo con PlayIntegrityAppCheckProviderFactory (RELEASE buildType).")
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Advertencia inicializando Firebase App Check: ${e.message}")
+            Log.e(TAG, "Error inicializando Firebase App Check: ${e.message}", e)
         }
     }
 

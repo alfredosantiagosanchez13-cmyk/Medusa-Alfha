@@ -1,9 +1,11 @@
 package com.example.medusaalfha.data.model
 
+import androidx.annotation.Keep
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@Keep
 data class VisitorEntry(
     val folio: String = "",
     val visitorName: String = "",

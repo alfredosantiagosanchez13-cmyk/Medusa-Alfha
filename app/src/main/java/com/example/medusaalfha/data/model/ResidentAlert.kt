@@ -1,5 +1,8 @@
 package com.example.medusaalfha.data.model
 
+import androidx.annotation.Keep
+
+@Keep
 data class ResidentAlert(
     val id: String = "",
     val type: AlertType = AlertType.VISITOR_ARRIVAL,

@@ -36,10 +36,6 @@ class AmenityBookingRepository(
 
     private val inMemoryBookings = mutableListOf<AmenityBooking>()
 
-    init {
-        inMemoryBookings.addAll(generateSampleBookings())
-    }
-
     /**
      * Obtiene el flujo de reservas para una fecha o general desde Firestore.
      */
@@ -47,11 +43,13 @@ class AmenityBookingRepository(
         condominiumId: String = DEFAULT_CONDOMINIUM_ID,
         dateFilter: String? = null
     ): Flow<List<AmenityBooking>> = callbackFlow {
-        // Emitir inmediatamente lista en memoria filtrada si aplica
-        val initialFiltered = if (dateFilter != null) {
-            inMemoryBookings.filter { it.dateString == dateFilter }
-        } else {
-            inMemoryBookings.toList()
+        // Emitir estado en memoria actual (inicia vacío para reflejar datos reales de Firestore)
+        val initialFiltered = synchronized(inMemoryBookings) {
+            if (dateFilter != null) {
+                inMemoryBookings.filter { it.dateString == dateFilter }
+            } else {
+                inMemoryBookings.toList()
+            }
         }
         trySend(initialFiltered)
 
@@ -69,8 +67,12 @@ class AmenityBookingRepository(
 
             listener = query.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.w(TAG, "Error escuchando reservas de Firestore: ${error.message}")
-                    trySend(initialFiltered)
+                    val code = (error as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: "UNKNOWN"
+                    Log.e(TAG, "FIRESTORE ERROR en getBookingsFlow [code=$code]: ${error.message}", error)
+                    trySend(synchronized(inMemoryBookings) {
+                        if (dateFilter != null) inMemoryBookings.filter { it.dateString == dateFilter }
+                        else inMemoryBookings.toList()
+                    })
                     return@addSnapshotListener
                 }
 
@@ -79,24 +81,29 @@ class AmenityBookingRepository(
                         doc.data?.let { AmenityBooking.fromMap(it) }
                     }
                     synchronized(inMemoryBookings) {
-                        for (b in bookings) {
-                            val idx = inMemoryBookings.indexOfFirst { it.id == b.id }
-                            if (idx != -1) inMemoryBookings[idx] = b else inMemoryBookings.add(b)
-                        }
+                        inMemoryBookings.clear()
+                        inMemoryBookings.addAll(bookings)
                     }
                     val filtered = if (dateFilter != null) {
                         bookings.filter { it.dateString == dateFilter }
                     } else {
                         bookings
                     }
+                    Log.d(TAG, "Firestore devolvió ${bookings.size} reservas reales para $condominiumId.")
                     trySend(filtered)
                 } else {
-                    trySend(initialFiltered)
+                    Log.d(TAG, "Firestore: colección $SUBCOLLECTION_BOOKINGS vacía para fecha=$dateFilter.")
+                    synchronized(inMemoryBookings) {
+                        if (dateFilter != null) inMemoryBookings.removeAll { it.dateString == dateFilter }
+                        else inMemoryBookings.clear()
+                    }
+                    trySend(emptyList())
                 }
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "Excepción conectando a Firestore reservas: ${t.message}")
-            trySend(initialFiltered)
+            val code = (t as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: t.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE EXCEPTION conectando a reservas [code=$code]: ${t.message}", t)
+            trySend(synchronized(inMemoryBookings) { inMemoryBookings.toList() })
         }
 
         awaitClose { listener?.remove() }
@@ -156,7 +163,8 @@ class AmenityBookingRepository(
             Log.d(TAG, "Reserva creada en Firestore exitosamente: ${booking.id}")
             Result.success(booking)
         } catch (e: Exception) {
-            Log.w(TAG, "Error guardando reserva en Firestore: ${e.message}. Activa en memoria.")
+            val code = (e as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: e.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE ERROR guardando reserva [code=$code]: ${e.message}. Activa en memoria.", e)
             Result.success(booking)
         }
     }
@@ -182,7 +190,8 @@ class AmenityBookingRepository(
             Log.d(TAG, "Reserva cancelada en Firestore: $bookingId")
             Result.success(true)
         } catch (e: Exception) {
-            Log.w(TAG, "Error cancelando reserva en Firestore: ${e.message}")
+            val code = (e as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: e.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE ERROR cancelando reserva [code=$code]: ${e.message}", e)
             Result.success(true)
         }
     }
@@ -203,7 +212,8 @@ class AmenityBookingRepository(
                 Log.d(TAG, "Reservas de muestra sembradas exitosamente en Firestore.")
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Aviso: no se pudo sembrar reservas en Firestore: ${e.message}")
+            val code = (e as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: e.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE ERROR sembrando reservas en Firestore [code=$code]: ${e.message}", e)
         }
     }
 

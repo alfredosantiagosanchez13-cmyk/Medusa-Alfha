@@ -1,7 +1,9 @@
 package com.example.medusaalfha.data.model
 
+import androidx.annotation.Keep
 import java.util.Locale
 
+@Keep
 enum class VisitorStatus(val label: String) {
     DENTRO("En Condominio"),
     SALIDA("Salida Registrada"),

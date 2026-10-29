@@ -27,22 +27,20 @@ class VisitorRepository(
         private const val TAG = "VisitorRepository"
         const val COLLECTION_CONDOMINIUMS = "condominiums"
         const val SUBCOLLECTION_VISITORS = "visitor_entries"
+        const val SUBCOLLECTION_VISITOR_LOGS = "visitor_logs"
         const val DEFAULT_CONDOMINIUM_ID = "PRADOS_1"
     }
 
     private val inMemoryFallbackList = mutableListOf<VisitorEntry>()
-
-    init {
-        inMemoryFallbackList.addAll(generateSampleEntries())
-    }
 
     /**
      * Retorna un Flow con la lista ordenada de visitantes desde Firestore
      * ordenado descendentemente por checkInTimestamp.
      */
     fun getVisitorEntriesFlow(condominiumId: String = DEFAULT_CONDOMINIUM_ID): Flow<List<VisitorEntry>> = callbackFlow {
-        // Emitir inmediatamente el estado en memoria para carga instantánea
-        trySend(inMemoryFallbackList.toList())
+        // Emitir estado en memoria actual (inicia vacío para reflejar datos reales de Firestore)
+        val initialList = synchronized(inMemoryFallbackList) { inMemoryFallbackList.toList() }
+        trySend(initialList)
 
         var listenerRegistration: com.google.firebase.firestore.ListenerRegistration? = null
         try {
@@ -54,8 +52,9 @@ class VisitorRepository(
 
             listenerRegistration = collectionRef.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.w(TAG, "Error escuchando visitantes de Firestore: ${error.message}. Usando memoria.")
-                    trySend(inMemoryFallbackList.toList())
+                    val code = (error as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: "UNKNOWN"
+                    Log.e(TAG, "FIRESTORE ERROR en getVisitorEntriesFlow [code=$code]: ${error.message}", error)
+                    trySend(synchronized(inMemoryFallbackList) { inMemoryFallbackList.toList() })
                     return@addSnapshotListener
                 }
 
@@ -67,15 +66,18 @@ class VisitorRepository(
                         inMemoryFallbackList.clear()
                         inMemoryFallbackList.addAll(entries)
                     }
+                    Log.d(TAG, "Firestore devolvió ${entries.size} visitantes reales para $condominiumId.")
                     trySend(entries)
                 } else {
-                    // Si la colección está vacía en la nube, se proveen los datos base
-                    trySend(inMemoryFallbackList.toList())
+                    Log.d(TAG, "Firestore: colección $SUBCOLLECTION_VISITORS vacía para $condominiumId (0 registros encontrados).")
+                    synchronized(inMemoryFallbackList) { inMemoryFallbackList.clear() }
+                    trySend(emptyList())
                 }
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "Excepción conectando a Firestore: ${t.message}")
-            trySend(inMemoryFallbackList.toList())
+            val code = (t as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: t.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE EXCEPTION conectando a visitantes [code=$code]: ${t.message}", t)
+            trySend(synchronized(inMemoryFallbackList) { inMemoryFallbackList.toList() })
         }
 
         awaitClose {
@@ -101,19 +103,18 @@ class VisitorRepository(
                     doc.data?.let { VisitorEntry.fromMap(it) }
                 }
             } else {
-                inMemoryFallbackList.toList()
+                emptyList()
             }
 
             synchronized(inMemoryFallbackList) {
-                if (entries.isNotEmpty()) {
-                    inMemoryFallbackList.clear()
-                    inMemoryFallbackList.addAll(entries)
-                }
+                inMemoryFallbackList.clear()
+                inMemoryFallbackList.addAll(entries)
             }
-            Log.d(TAG, "Bitácora actualizada exitosamente desde Firestore: ${entries.size} registros.")
+            Log.d(TAG, "Bitácora actualizada exitosamente desde Firestore: ${entries.size} registros reales.")
             Result.success(entries)
         } catch (e: Exception) {
-            Log.w(TAG, "Error refrescando visitantes desde Firestore: ${e.message}")
+            val code = (e as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: e.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE ERROR refrescando visitantes desde Firestore [code=$code]: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -138,7 +139,8 @@ class VisitorRepository(
             Log.d(TAG, "Visitante guardado en Firestore exitosamente: ${entry.folio}")
             Result.success(entry)
         } catch (e: Exception) {
-            Log.w(TAG, "Error guardando visitante en Firestore: ${e.message}. Se mantiene localmente.")
+            val code = (e as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: e.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE ERROR guardando visitante [code=$code]: ${e.message}. Se mantiene localmente.", e)
             Result.success(entry)
         }
     }
@@ -174,7 +176,8 @@ class VisitorRepository(
             Log.d(TAG, "Salida de visitante registrada en Firestore: $folio")
             Result.success(true)
         } catch (e: Exception) {
-            Log.w(TAG, "Error actualizando salida en Firestore: ${e.message}")
+            val code = (e as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: e.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE ERROR actualizando salida en Firestore [code=$code]: ${e.message}", e)
             Result.success(true)
         }
     }
@@ -209,7 +212,8 @@ class VisitorRepository(
                 null
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error consultando estado de visitante en Firestore: ${e.message}")
+            val code = (e as? com.google.firebase.firestore.FirebaseFirestoreException)?.code?.name ?: e.javaClass.simpleName
+            Log.e(TAG, "FIRESTORE ERROR consultando estado de visitante [code=$code]: ${e.message}", e)
             null
         }
     }

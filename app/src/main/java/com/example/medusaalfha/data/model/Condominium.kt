@@ -1,5 +1,8 @@
 package com.example.medusaalfha.data.model
 
+import androidx.annotation.Keep
+
+@Keep
 data class Condominium(
     val id: String = "PRADOS_1",
     val name: String = "Prados Residencial · Caseta Principal",

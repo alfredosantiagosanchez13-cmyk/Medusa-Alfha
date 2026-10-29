@@ -18,8 +18,24 @@ object FirebaseProvider {
     fun getFirestore(context: Context): FirebaseFirestore {
         return firestoreInstance ?: synchronized(this) {
             firestoreInstance ?: run {
-                val dbId = context.applicationContext.getString(R.string.firestore_database_id)
-                FirebaseFirestore.getInstance(dbId).also { firestoreInstance = it }
+                val dbId = try {
+                    context.applicationContext.getString(R.string.firestore_database_id).trim()
+                } catch (_: Exception) {
+                    ""
+                }
+                val instance = if (dbId.isEmpty() || dbId == "(default)") {
+                    android.util.Log.d("FirebaseProvider", "Conectando a Cloud Firestore con base de datos por defecto (default).")
+                    FirebaseFirestore.getInstance()
+                } else {
+                    try {
+                        android.util.Log.d("FirebaseProvider", "Conectando a Cloud Firestore con databaseId: $dbId")
+                        FirebaseFirestore.getInstance(dbId)
+                    } catch (e: Exception) {
+                        android.util.Log.w("FirebaseProvider", "No se pudo conectar a custom dbId '$dbId', usando instancia (default): ${e.message}")
+                        FirebaseFirestore.getInstance()
+                    }
+                }
+                instance.also { firestoreInstance = it }
             }
         }
     }
