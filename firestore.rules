@@ -108,43 +108,43 @@ service cloud.firestore {
 
     // Módulos del Condominio y Registro de Condominios (Altas ALFHA Master)
     match /condominiums/{condominiumId} {
-      allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && isValidCondominium(request.resource.data);
+      allow read: if true;
+      allow create, update: if isValidCondominium(request.resource.data);
       allow delete: if isAuthenticated();
 
       match /patrol_checkpoints/{checkpointId} {
-        allow read: if isAuthenticated();
+        allow read: if true;
         allow create, update: if isAuthenticated() && isValidPatrolCheckpoint(request.resource.data);
         allow delete: if isAuthenticated();
       }
 
       match /patrol_reports/{reportId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated() && isValidPatrolReport(request.resource.data);
+        allow read: if true;
+        allow create, update: if isValidPatrolReport(request.resource.data);
         allow delete: if isAuthenticated();
       }
 
       match /visitor_entries/{visitorId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated() && isValidVisitorEntry(request.resource.data);
+        allow read: if true;
+        allow create, update: if isValidVisitorEntry(request.resource.data);
         allow delete: if isAuthenticated();
       }
 
       match /visitor_logs/{visitorId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated() && isValidVisitorEntry(request.resource.data);
+        allow read: if true;
+        allow create, update: if isValidVisitorEntry(request.resource.data);
         allow delete: if isAuthenticated();
       }
 
       match /resident_alerts/{alertId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated() && isValidResidentAlert(request.resource.data);
+        allow read: if true;
+        allow create, update: if isValidResidentAlert(request.resource.data);
         allow delete: if isAuthenticated();
       }
 
       match /amenity_bookings/{bookingId} {
-        allow read: if isAuthenticated();
-        allow create, update: if isAuthenticated() && isValidAmenityBooking(request.resource.data);
+        allow read: if true;
+        allow create, update: if isValidAmenityBooking(request.resource.data);
         allow delete: if isAuthenticated();
       }
     }
